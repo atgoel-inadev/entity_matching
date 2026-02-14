@@ -1,0 +1,1232 @@
+{
+	"info": {
+		"_postman_id": "em-api-collection-001",
+		"name": "Entity Matching API",
+		"description": "Hybrid fuzzy + semantic entity matching powered by Snowflake Cortex.\n\nBase URL: http://localhost:8001\n\nEndpoints:\n- POST /match - Single entity match\n- POST /match/batch - Batch entity match\n- GET /health - Health check\n- GET /stats - Monitoring metrics\n- DELETE /cache - Cache invalidation",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8001",
+			"type": "string"
+		}
+	],
+	"item": [
+		{
+			"name": "Health & Monitoring",
+			"item": [
+				{
+					"name": "Health Check",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/health",
+							"host": ["{{base_url}}"],
+							"path": ["health"]
+						},
+						"description": "Check Snowflake and Redis connectivity."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Monitoring Stats",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/stats",
+							"host": ["{{base_url}}"],
+							"path": ["stats"]
+						},
+						"description": "Retrieve performance metrics, cache stats, cost estimates, and health status from Snowflake."
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Single Match - Exact",
+			"item": [
+				{
+					"name": "Exact: IBM",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"IBM\",\n    \"threshold\": 0.65\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/match",
+							"host": ["{{base_url}}"],
+							"path": ["match"]
+						},
+						"description": "Exact match for well-known abbreviation. Should match 'International Business Machines Corporation'."
+					},
+					"response": []
+				},
+				{
+					"name": "Exact: Apple",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"Apple\",\n    \"threshold\": 0.65\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/match",
+							"host": ["{{base_url}}"],
+							"path": ["match"]
+						},
+						"description": "Exact match for common company name. Should match 'Apple Inc'."
+					},
+					"response": []
+				},
+				{
+					"name": "Exact: Walmart",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"Walmart\",\n    \"threshold\": 0.65\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/match",
+							"host": ["{{base_url}}"],
+							"path": ["match"]
+						},
+						"description": "Exact match. Should match 'Walmart Inc'."
+					},
+					"response": []
+				},
+				{
+					"name": "Exact: Tesla",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"Tesla\",\n    \"threshold\": 0.65\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/match",
+							"host": ["{{base_url}}"],
+							"path": ["match"]
+						},
+						"description": "Exact match. Should match 'Tesla Inc'."
+					},
+					"response": []
+				},
+				{
+					"name": "Exact: Netflix",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"Netflix\",\n    \"threshold\": 0.65\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/match",
+							"host": ["{{base_url}}"],
+							"path": ["match"]
+						},
+						"description": "Exact match. Should match 'Netflix Inc'."
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Single Match - Fuzzy (Typos)",
+			"item": [
+				{
+					"name": "Fuzzy: Microsft (missing o)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"Microsft\",\n    \"threshold\": 0.5\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/match",
+							"host": ["{{base_url}}"],
+							"path": ["match"]
+						},
+						"description": "Misspelling of Microsoft - missing 'o'. Should fuzzy-match to 'Microsoft Corporation'."
+					},
+					"response": []
+				},
+				{
+					"name": "Fuzzy: Gooogle (extra o)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"Gooogle\",\n    \"threshold\": 0.5\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/match",
+							"host": ["{{base_url}}"],
+							"path": ["match"]
+						},
+						"description": "Misspelling of Google - extra 'o'. Should fuzzy-match to 'Alphabet Inc'."
+					},
+					"response": []
+				},
+				{
+					"name": "Fuzzy: Wal Mart (space variation)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"Wal Mart\",\n    \"threshold\": 0.5\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/match",
+							"host": ["{{base_url}}"],
+							"path": ["match"]
+						},
+						"description": "Spacing variation of Walmart. Should match 'Walmart Inc'."
+					},
+					"response": []
+				},
+				{
+					"name": "Fuzzy: Amazn (missing letter)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"Amazn\",\n    \"threshold\": 0.5\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/match",
+							"host": ["{{base_url}}"],
+							"path": ["match"]
+						},
+						"description": "Misspelling of Amazon. Should fuzzy-match to 'Amazon.com Inc'."
+					},
+					"response": []
+				},
+				{
+					"name": "Fuzzy: Johnsn & Johnson (missing o)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"Johnsn & Johnson\",\n    \"threshold\": 0.5\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/match",
+							"host": ["{{base_url}}"],
+							"path": ["match"]
+						},
+						"description": "Misspelling of Johnson & Johnson. Should fuzzy-match."
+					},
+					"response": []
+				},
+				{
+					"name": "Fuzzy: Nvdia (missing I)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"Nvdia\",\n    \"threshold\": 0.5\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/match",
+							"host": ["{{base_url}}"],
+							"path": ["match"]
+						},
+						"description": "Misspelling of NVIDIA. Should fuzzy-match to 'NVIDIA Corporation'."
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Single Match - Semantic (Aliases)",
+			"item": [
+				{
+					"name": "Semantic: Big Blue → IBM",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"Big Blue\",\n    \"threshold\": 0.5\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/match",
+							"host": ["{{base_url}}"],
+							"path": ["match"]
+						},
+						"description": "Nickname for IBM. Tests semantic matching via embeddings."
+					},
+					"response": []
+				},
+				{
+					"name": "Semantic: Chase → JPMorgan",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"Chase\",\n    \"threshold\": 0.5\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/match",
+							"host": ["{{base_url}}"],
+							"path": ["match"]
+						},
+						"description": "Chase is a subsidiary brand of JPMorgan. Tests alias matching."
+					},
+					"response": []
+				},
+				{
+					"name": "Semantic: Facebook → Meta",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"Facebook\",\n    \"threshold\": 0.5\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/match",
+							"host": ["{{base_url}}"],
+							"path": ["match"]
+						},
+						"description": "Former name of Meta Platforms Inc. Tests alias/semantic matching."
+					},
+					"response": []
+				},
+				{
+					"name": "Semantic: Esso → ExxonMobil",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"Esso\",\n    \"threshold\": 0.5\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/match",
+							"host": ["{{base_url}}"],
+							"path": ["match"]
+						},
+						"description": "Trade name of Exxon Mobil. Tests semantic matching."
+					},
+					"response": []
+				},
+				{
+					"name": "Semantic: PlayStation → Sony",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"PlayStation\",\n    \"threshold\": 0.5\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/match",
+							"host": ["{{base_url}}"],
+							"path": ["match"]
+						},
+						"description": "Brand of Sony Interactive Entertainment. Tests semantic matching."
+					},
+					"response": []
+				},
+				{
+					"name": "Semantic: TikTok → ByteDance",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"TikTok\",\n    \"threshold\": 0.5\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/match",
+							"host": ["{{base_url}}"],
+							"path": ["match"]
+						},
+						"description": "Product of ByteDance Ltd. Tests semantic/alias matching."
+					},
+					"response": []
+				},
+				{
+					"name": "Semantic: Xfinity → Comcast",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"Xfinity\",\n    \"threshold\": 0.5\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/match",
+							"host": ["{{base_url}}"],
+							"path": ["match"]
+						},
+						"description": "Brand of Comcast Corporation. Tests semantic/alias matching."
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Single Match - Abbreviations",
+			"item": [
+				{
+					"name": "Abbrev: JP Morgan",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"JP Morgan\",\n    \"threshold\": 0.5\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/match",
+							"host": ["{{base_url}}"],
+							"path": ["match"]
+						},
+						"description": "Short form of JPMorgan Chase & Co."
+					},
+					"response": []
+				},
+				{
+					"name": "Abbrev: P&G",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"P&G\",\n    \"threshold\": 0.5\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/match",
+							"host": ["{{base_url}}"],
+							"path": ["match"]
+						},
+						"description": "Abbreviation for The Procter & Gamble Company."
+					},
+					"response": []
+				},
+				{
+					"name": "Abbrev: GE",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"GE\",\n    \"threshold\": 0.5\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/match",
+							"host": ["{{base_url}}"],
+							"path": ["match"]
+						},
+						"description": "Abbreviation for General Electric Company."
+					},
+					"response": []
+				},
+				{
+					"name": "Abbrev: TSMC",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"TSMC\",\n    \"threshold\": 0.5\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/match",
+							"host": ["{{base_url}}"],
+							"path": ["match"]
+						},
+						"description": "Abbreviation for Taiwan Semiconductor Manufacturing Company."
+					},
+					"response": []
+				},
+				{
+					"name": "Abbrev: AMD",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"AMD\",\n    \"threshold\": 0.5\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/match",
+							"host": ["{{base_url}}"],
+							"path": ["match"]
+						},
+						"description": "Abbreviation for Advanced Micro Devices Inc."
+					},
+					"response": []
+				},
+				{
+					"name": "Abbrev: BofA",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"BofA\",\n    \"threshold\": 0.5\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/match",
+							"host": ["{{base_url}}"],
+							"path": ["match"]
+						},
+						"description": "Abbreviation for Bank of America Corporation."
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Single Match - New Entity Creation",
+			"item": [
+				{
+					"name": "New Entity: Unknown Company (high threshold)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"Quantum Dynamics Solutions Inc\",\n    \"threshold\": 0.9,\n    \"metadata\": {\n        \"entity_type\": \"COMPANY\",\n        \"industry\": \"Technology\",\n        \"country\": \"USA\"\n    }\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/match",
+							"host": ["{{base_url}}"],
+							"path": ["match"]
+						},
+						"description": "Entity that does NOT exist in the database. With high threshold (0.9) and metadata, should create a new entity. Expect is_new_entity=true and match_type=NEW_ENTITY."
+					},
+					"response": []
+				},
+				{
+					"name": "New Entity: Verify it now matches",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"Quantum Dynamics Solutions\",\n    \"threshold\": 0.6\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/match",
+							"host": ["{{base_url}}"],
+							"path": ["match"]
+						},
+						"description": "Run AFTER 'New Entity: Unknown Company'. The previously created entity should now be found by fuzzy/semantic match."
+					},
+					"response": []
+				},
+				{
+					"name": "New Entity: Foreign company with metadata",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"Sakura Technologies KK\",\n    \"threshold\": 0.9,\n    \"metadata\": {\n        \"entity_type\": \"COMPANY\",\n        \"industry\": \"Robotics\",\n        \"country\": \"Japan\"\n    }\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/match",
+							"host": ["{{base_url}}"],
+							"path": ["match"]
+						},
+						"description": "Creates a new Japanese company entity with metadata."
+					},
+					"response": []
+				},
+				{
+					"name": "New Entity: No metadata",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"NovaBridge Analytics Corp\",\n    \"threshold\": 0.95\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/match",
+							"host": ["{{base_url}}"],
+							"path": ["match"]
+						},
+						"description": "Creates a new entity without metadata. Should default entity_type to COMPANY."
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Single Match - Threshold Variations",
+			"item": [
+				{
+					"name": "Low Threshold (0.3): Broad match",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"Soft\",\n    \"threshold\": 0.3\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/match",
+							"host": ["{{base_url}}"],
+							"path": ["match"]
+						},
+						"description": "Very low threshold - should return many partial matches like SoftBank, Microsoft, etc."
+					},
+					"response": []
+				},
+				{
+					"name": "Medium Threshold (0.65): Default",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"Coca Cola\",\n    \"threshold\": 0.65\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/match",
+							"host": ["{{base_url}}"],
+							"path": ["match"]
+						},
+						"description": "Default threshold. Space-separated variation of Coca-Cola."
+					},
+					"response": []
+				},
+				{
+					"name": "High Threshold (0.95): Strict match",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"Microsft\",\n    \"threshold\": 0.95\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/match",
+							"host": ["{{base_url}}"],
+							"path": ["match"]
+						},
+						"description": "High threshold - the typo 'Microsft' may NOT match at 0.95. Could create a new entity instead."
+					},
+					"response": []
+				},
+				{
+					"name": "Default Threshold (omitted)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"Oracle\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/match",
+							"host": ["{{base_url}}"],
+							"path": ["match"]
+						},
+						"description": "Threshold omitted - uses server default (0.65). Should match Oracle Corporation."
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Single Match - Edge Cases",
+			"item": [
+				{
+					"name": "Edge: Very short name 'X'",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"X\",\n    \"threshold\": 0.5\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/match",
+							"host": ["{{base_url}}"],
+							"path": ["match"]
+						},
+						"description": "Single character 'X' - could match Twitter/X Corp alias."
+					},
+					"response": []
+				},
+				{
+					"name": "Edge: Special characters",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"AT&T\",\n    \"threshold\": 0.5\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/match",
+							"host": ["{{base_url}}"],
+							"path": ["match"]
+						},
+						"description": "Name with ampersand. Should match AT&T Inc."
+					},
+					"response": []
+				},
+				{
+					"name": "Edge: Long formal name",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"International Business Machines Corporation\",\n    \"threshold\": 0.65\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/match",
+							"host": ["{{base_url}}"],
+							"path": ["match"]
+						},
+						"description": "Full legal name of IBM. Should exact-match."
+					},
+					"response": []
+				},
+				{
+					"name": "Edge: Extra whitespace",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"   Apple   Inc   \",\n    \"threshold\": 0.65\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/match",
+							"host": ["{{base_url}}"],
+							"path": ["match"]
+						},
+						"description": "Name with excessive whitespace. Normalization should handle this."
+					},
+					"response": []
+				},
+				{
+					"name": "Edge: Mixed case",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"mIcRoSoFt\",\n    \"threshold\": 0.5\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/match",
+							"host": ["{{base_url}}"],
+							"path": ["match"]
+						},
+						"description": "Random casing. Normalization lowercases, should still match."
+					},
+					"response": []
+				},
+				{
+					"name": "Edge: Dots and periods",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"J.P. Morgan\",\n    \"threshold\": 0.5\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/match",
+							"host": ["{{base_url}}"],
+							"path": ["match"]
+						},
+						"description": "Name with periods/dots. Should match JPMorgan Chase & Co."
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Single Match - Cross-Industry",
+			"item": [
+				{
+					"name": "Industry: Pharma - Pfizer",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"Pfizer Pharmaceuticals\",\n    \"threshold\": 0.5\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/match",
+							"host": ["{{base_url}}"],
+							"path": ["match"]
+						},
+						"description": "Pharma company with descriptive suffix."
+					},
+					"response": []
+				},
+				{
+					"name": "Industry: Automotive - Bayerische Motoren Werke",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"Bayerische Motoren Werke\",\n    \"threshold\": 0.5\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/match",
+							"host": ["{{base_url}}"],
+							"path": ["match"]
+						},
+						"description": "Full German name of BMW. Tests semantic matching across languages."
+					},
+					"response": []
+				},
+				{
+					"name": "Industry: Consulting - PwC",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"PwC\",\n    \"threshold\": 0.5\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/match",
+							"host": ["{{base_url}}"],
+							"path": ["match"]
+						},
+						"description": "Common abbreviation for PricewaterhouseCoopers."
+					},
+					"response": []
+				},
+				{
+					"name": "Industry: Mining - BHP Billiton",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"BHP Billiton\",\n    \"threshold\": 0.5\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/match",
+							"host": ["{{base_url}}"],
+							"path": ["match"]
+						},
+						"description": "Former name of BHP Group Limited."
+					},
+					"response": []
+				},
+				{
+					"name": "Industry: Cybersecurity - Crowd Strike",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"Crowd Strike\",\n    \"threshold\": 0.5\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/match",
+							"host": ["{{base_url}}"],
+							"path": ["match"]
+						},
+						"description": "Space-separated variation of CrowdStrike."
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Batch Match",
+			"item": [
+				{
+					"name": "Batch: Tech Giants Mix",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"entities\": [\n        {\"name\": \"Apple\", \"threshold\": 0.65},\n        {\"name\": \"Gooogle\", \"threshold\": 0.5},\n        {\"name\": \"MSFT\", \"threshold\": 0.5},\n        {\"name\": \"Amazon Web Services\", \"threshold\": 0.5},\n        {\"name\": \"Meta\", \"threshold\": 0.65}\n    ]\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/match/batch",
+							"host": ["{{base_url}}"],
+							"path": ["match", "batch"]
+						},
+						"description": "Batch of 5 tech companies: exact, typo, ticker, subsidiary, and renamed company."
+					},
+					"response": []
+				},
+				{
+					"name": "Batch: Finance Sector",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"entities\": [\n        {\"name\": \"JP Morgan\"},\n        {\"name\": \"Goldman Sachs\"},\n        {\"name\": \"BofA\"},\n        {\"name\": \"Visa International\"},\n        {\"name\": \"HSBC Bank\"}\n    ]\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/match/batch",
+							"host": ["{{base_url}}"],
+							"path": ["match", "batch"]
+						},
+						"description": "Batch of 5 financial companies with various name forms."
+					},
+					"response": []
+				},
+				{
+					"name": "Batch: Mixed - Existing + New Entities",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"entities\": [\n        {\"name\": \"IBM\", \"threshold\": 0.65},\n        {\"name\": \"Totally Unknown Startup ABC\", \"threshold\": 0.95, \"metadata\": {\"industry\": \"AI\", \"country\": \"USA\"}},\n        {\"name\": \"Tesla Motors\", \"threshold\": 0.5},\n        {\"name\": \"Another Fake Company 123\", \"threshold\": 0.95, \"metadata\": {\"industry\": \"Fintech\", \"country\": \"UK\"}}\n    ]\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/match/batch",
+							"host": ["{{base_url}}"],
+							"path": ["match", "batch"]
+						},
+						"description": "Mix of existing matches and new entities. Two should match, two should be created. Check is_new_entity field in results."
+					},
+					"response": []
+				},
+				{
+					"name": "Batch: Global Companies",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"entities\": [\n        {\"name\": \"Toyota\"},\n        {\"name\": \"Samsung\"},\n        {\"name\": \"Alibaba\"},\n        {\"name\": \"Nestle\"},\n        {\"name\": \"Royal Dutch Shell\"},\n        {\"name\": \"Infosys\"},\n        {\"name\": \"Deutsche Bank\"},\n        {\"name\": \"Louis Vuitton\"}\n    ]\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/match/batch",
+							"host": ["{{base_url}}"],
+							"path": ["match", "batch"]
+						},
+						"description": "8 companies from different countries: Japan, Korea, China, Switzerland, UK, India, Germany, France."
+					},
+					"response": []
+				},
+				{
+					"name": "Batch: All Typos",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"entities\": [\n        {\"name\": \"Microsfot\", \"threshold\": 0.4},\n        {\"name\": \"Amzon\", \"threshold\": 0.4},\n        {\"name\": \"Gogle\", \"threshold\": 0.4},\n        {\"name\": \"Teslla\", \"threshold\": 0.4},\n        {\"name\": \"Netflixx\", \"threshold\": 0.4}\n    ]\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/match/batch",
+							"host": ["{{base_url}}"],
+							"path": ["match", "batch"]
+						},
+						"description": "All misspelled names with low threshold. Tests fuzzy matching resilience."
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Cache Operations",
+			"item": [
+				{
+					"name": "Cache: Clear All",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/cache",
+							"host": ["{{base_url}}"],
+							"path": ["cache"]
+						},
+						"description": "Invalidate ALL cache entries in both Redis and Snowflake."
+					},
+					"response": []
+				},
+				{
+					"name": "Cache: Clear Specific Entity",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/cache?entity_id=abc-123-def",
+							"host": ["{{base_url}}"],
+							"path": ["cache"],
+							"query": [
+								{
+									"key": "entity_id",
+									"value": "abc-123-def",
+									"description": "Replace with actual entity_id from a match result"
+								}
+							]
+						},
+						"description": "Invalidate cache for a specific entity. Replace entity_id with an actual ID from a match response."
+					},
+					"response": []
+				},
+				{
+					"name": "Cache: Match → Clear → Re-match (test cache miss)",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"// This is step 1: the first match will be computed fresh",
+									"// Then run 'Cache: Clear All' and re-run this to see was_cached=false"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"Snowflake\",\n    \"threshold\": 0.65\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/match",
+							"host": ["{{base_url}}"],
+							"path": ["match"]
+						},
+						"description": "Run this, note was_cached field. Run again to see was_cached=true. Then clear cache and run again to see was_cached=false."
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Error Cases",
+			"item": [
+				{
+					"name": "Error: Empty name",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"\",\n    \"threshold\": 0.5\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/match",
+							"host": ["{{base_url}}"],
+							"path": ["match"]
+						},
+						"description": "Empty name should return 422 validation error."
+					},
+					"response": []
+				},
+				{
+					"name": "Error: Threshold out of range",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"Test\",\n    \"threshold\": 1.5\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/match",
+							"host": ["{{base_url}}"],
+							"path": ["match"]
+						},
+						"description": "Threshold > 1.0 should return 422 validation error."
+					},
+					"response": []
+				},
+				{
+					"name": "Error: Missing body",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{}"
+						},
+						"url": {
+							"raw": "{{base_url}}/match",
+							"host": ["{{base_url}}"],
+							"path": ["match"]
+						},
+						"description": "Missing required 'name' field should return 422 validation error."
+					},
+					"response": []
+				},
+				{
+					"name": "Error: Empty batch",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"entities\": []\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/match/batch",
+							"host": ["{{base_url}}"],
+							"path": ["match", "batch"]
+						},
+						"description": "Empty entities array should return 422 validation error."
+					},
+					"response": []
+				},
+				{
+					"name": "Error: Invalid JSON",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "this is not json"
+						},
+						"url": {
+							"raw": "{{base_url}}/match",
+							"host": ["{{base_url}}"],
+							"path": ["match"]
+						},
+						"description": "Invalid JSON body should return 422."
+					},
+					"response": []
+				}
+			]
+		}
+	]
+}

@@ -1,0 +1,738 @@
+{
+  "info": {
+    "name": "ResolveIQ API",
+    "description": "ResolveIQ — Generic Entity Resolution Engine powered by Snowflake Cortex.\n\nProfile-based, configuration-driven entity resolution with multi-field matching (EXACT, FUZZY, SEMANTIC, PHONETIC, NUMERIC).\n\nBase URL: http://localhost:8001",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "resolveiq"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8001",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health & Monitoring",
+      "description": "Health checks and monitoring endpoints.",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health",
+              "host": ["{{base_url}}"],
+              "path": ["health"]
+            },
+            "description": "Checks Snowflake and Redis connectivity. Returns component-level status (connected/degraded/error)."
+          }
+        },
+        {
+          "name": "Aggregate Stats",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/stats",
+              "host": ["{{base_url}}"],
+              "path": ["stats"]
+            },
+            "description": "Aggregate monitoring report across all profiles. Includes entity counts, performance metrics, and health status."
+          }
+        },
+        {
+          "name": "Per-Profile Stats (Company)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/profiles/company/stats",
+              "host": ["{{base_url}}"],
+              "path": ["profiles", "company", "stats"]
+            },
+            "description": "Monitoring stats scoped to the 'company' profile. Shows entity count, match volume, avg latency, cache hit rate, and field effectiveness."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Profile Management",
+      "description": "CRUD operations for resolution profiles and their field configurations.",
+      "item": [
+        {
+          "name": "List All Profiles",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/profiles",
+              "host": ["{{base_url}}"],
+              "path": ["profiles"]
+            },
+            "description": "Lists all active resolution profiles with their field configurations. Returns profile_slug, entity_type, field count, and default_threshold."
+          }
+        },
+        {
+          "name": "Create Profile — Address Dedup",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"profile_name\": \"Address Dedup\",\n  \"entity_type\": \"Address\",\n  \"default_threshold\": 0.7,\n  \"fields\": [\n    {\n      \"field_name\": \"street\",\n      \"match_strategy\": \"FUZZY\",\n      \"weight\": 3.0,\n      \"is_required\": true,\n      \"is_primary_display\": true\n    },\n    {\n      \"field_name\": \"city\",\n      \"match_strategy\": \"FUZZY\",\n      \"weight\": 2.0,\n      \"is_required\": false,\n      \"is_primary_display\": false\n    },\n    {\n      \"field_name\": \"zip_code\",\n      \"match_strategy\": \"EXACT\",\n      \"weight\": 4.0,\n      \"is_required\": false,\n      \"is_primary_display\": false\n    },\n    {\n      \"field_name\": \"country\",\n      \"match_strategy\": \"EXACT\",\n      \"weight\": 1.0,\n      \"is_required\": false,\n      \"is_primary_display\": false\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/profiles",
+              "host": ["{{base_url}}"],
+              "path": ["profiles"]
+            },
+            "description": "Creates a new 'Address Dedup' profile with 4 fields: street (FUZZY, w=3, required, primary_display), city (FUZZY, w=2), zip_code (EXACT, w=4), country (EXACT, w=1). Auto-generates slug 'address-dedup'."
+          }
+        },
+        {
+          "name": "Get Profile — Company",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/profiles/company",
+              "host": ["{{base_url}}"],
+              "path": ["profiles", "company"]
+            },
+            "description": "Gets the 'company' profile details including all field configurations (name, industry, country), their match strategies, weights, and profile metadata."
+          }
+        },
+        {
+          "name": "Update Profile — Company Threshold",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"default_threshold\": 0.7\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/profiles/company",
+              "host": ["{{base_url}}"],
+              "path": ["profiles", "company"]
+            },
+            "description": "Updates the company profile's default threshold from 0.65 to 0.7. Only provided fields are updated."
+          }
+        },
+        {
+          "name": "Delete Profile — Address Dedup",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/profiles/address-dedup",
+              "host": ["{{base_url}}"],
+              "path": ["profiles", "address-dedup"]
+            },
+            "description": "Soft-deletes the 'address-dedup' profile (sets is_active=FALSE). Entities are preserved but resolution is disabled."
+          }
+        },
+        {
+          "name": "Add Field — Company Website",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"field_name\": \"website\",\n  \"match_strategy\": \"EXACT\",\n  \"weight\": 0.5,\n  \"is_required\": false,\n  \"is_primary_display\": false\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/profiles/company/fields",
+              "host": ["{{base_url}}"],
+              "path": ["profiles", "company", "fields"]
+            },
+            "description": "Adds a new 'website' field to the company profile with EXACT match strategy and low weight (0.5). Tests dynamic field addition."
+          }
+        },
+        {
+          "name": "Update Field — Company Industry Weight",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"weight\": 2.0\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/profiles/company/fields/industry",
+              "host": ["{{base_url}}"],
+              "path": ["profiles", "company", "fields", "industry"]
+            },
+            "description": "Updates the 'industry' field weight from 1.0 to 2.0, increasing its influence on the composite match score."
+          }
+        },
+        {
+          "name": "Delete Field — Company Website",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/profiles/company/fields/website",
+              "host": ["{{base_url}}"],
+              "path": ["profiles", "company", "fields", "website"]
+            },
+            "description": "Removes the 'website' field from the company profile. Existing entities retain field_values data but it won't be used in scoring."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Resolution — Company Profile",
+      "description": "Entity resolution requests against the 'company' profile. Tests EXACT, FUZZY, SEMANTIC matching and new entity creation.",
+      "item": [
+        {
+          "name": "Resolve — Exact Match (IBM)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fields\": {\n    \"name\": \"IBM\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/profiles/company/resolve",
+              "host": ["{{base_url}}"],
+              "path": ["profiles", "company", "resolve"]
+            },
+            "description": "Resolves 'IBM' against the company profile. Should return exact match to 'International Business Machines Corporation' with match_score=1.0 and match_type=EXACT."
+          }
+        },
+        {
+          "name": "Resolve — Fuzzy Match (Microsft + Industry)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fields\": {\n    \"name\": \"Microsft\",\n    \"industry\": \"Technology\"\n  },\n  \"threshold\": 0.5\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/profiles/company/resolve",
+              "host": ["{{base_url}}"],
+              "path": ["profiles", "company", "resolve"]
+            },
+            "description": "Resolves a misspelled 'Microsft' with industry hint. Tests multi-field scoring where name (SEMANTIC, w=6) + industry (EXACT, w=1) contribute to composite score. Should fuzzy-match to Microsoft Corporation."
+          }
+        },
+        {
+          "name": "Resolve — Semantic Match (Big Blue)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fields\": {\n    \"name\": \"Big Blue\"\n  },\n  \"threshold\": 0.5\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/profiles/company/resolve",
+              "host": ["{{base_url}}"],
+              "path": ["profiles", "company", "resolve"]
+            },
+            "description": "Tests pure semantic matching. 'Big Blue' is a well-known nickname for IBM — should match via embedding similarity even though there's zero string overlap with 'International Business Machines'."
+          }
+        },
+        {
+          "name": "Resolve — New Entity (Create If Missing)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fields\": {\n    \"name\": \"Quantum Dynamics Inc\",\n    \"industry\": \"AI\",\n    \"country\": \"USA\"\n  },\n  \"threshold\": 0.95,\n  \"create_if_missing\": true,\n  \"metadata\": {\n    \"source\": \"api\",\n    \"added_by\": \"postman_test\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/profiles/company/resolve",
+              "host": ["{{base_url}}"],
+              "path": ["profiles", "company", "resolve"]
+            },
+            "description": "Resolves with a very high threshold (0.95) and create_if_missing=true. Since 'Quantum Dynamics Inc' likely doesn't exist, it should be created as a new entity with is_new_entity=true. SEMANTIC field embeddings are auto-generated."
+          }
+        },
+        {
+          "name": "Resolve Batch — 5 Companies",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"entities\": [\n    {\"fields\": {\"name\": \"Apple\"}, \"threshold\": 0.6},\n    {\"fields\": {\"name\": \"Gogle\", \"industry\": \"Technology\"}, \"threshold\": 0.5},\n    {\"fields\": {\"name\": \"Amazon Web Services\"}, \"threshold\": 0.7},\n    {\"fields\": {\"name\": \"Tesla Motors\"}, \"threshold\": 0.6},\n    {\"fields\": {\"name\": \"Totally New Corp XYZ\"}, \"threshold\": 0.95, \"create_if_missing\": true}\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/profiles/company/resolve/batch",
+              "host": ["{{base_url}}"],
+              "path": ["profiles", "company", "resolve", "batch"]
+            },
+            "description": "Batch resolve 5 companies in one request: Apple (exact), Gogle (fuzzy), Amazon Web Services (semantic), Tesla Motors (fuzzy/semantic), and a novel company with create_if_missing. Expect total_processed=5."
+          }
+        },
+        {
+          "name": "List Entities — Company (Paginated)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/profiles/company/entities?limit=10&offset=0",
+              "host": ["{{base_url}}"],
+              "path": ["profiles", "company", "entities"],
+              "query": [
+                {"key": "limit", "value": "10"},
+                {"key": "offset", "value": "0"}
+              ]
+            },
+            "description": "Lists the first 10 entities in the company profile. Returns entity_id, display_name, field_values, and metadata. Supports pagination via limit/offset."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Resolution — Supplier Profile",
+      "description": "Multi-field resolution against the 'supplier-dedup' profile. Tests EXACT fast-path (tax_id), composite scoring, and partial matching.",
+      "item": [
+        {
+          "name": "Resolve — Tax ID Fast-Path",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fields\": {\n    \"name\": \"Acme\",\n    \"tax_id\": \"36-1234567\"\n  },\n  \"threshold\": 0.5\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/profiles/supplier-dedup/resolve",
+              "host": ["{{base_url}}"],
+              "path": ["profiles", "supplier-dedup", "resolve"]
+            },
+            "description": "Tests EXACT field fast-path optimization. tax_id (EXACT, w=3) should trigger a direct lookup before the full scoring pipeline, delivering <50ms response. If tax_id matches, returns immediately without computing SEMANTIC embeddings."
+          }
+        },
+        {
+          "name": "Resolve — Multi-Field Composite",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fields\": {\n    \"name\": \"Global Parts Mfg\",\n    \"city\": \"Detroit\",\n    \"country\": \"USA\"\n  },\n  \"threshold\": 0.5\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/profiles/supplier-dedup/resolve",
+              "host": ["{{base_url}}"],
+              "path": ["profiles", "supplier-dedup", "resolve"]
+            },
+            "description": "Multi-field composite matching without EXACT fast-path fields. Scores: name (SEMANTIC, w=5) + city (FUZZY, w=1.5) + country (EXACT, w=1). Missing fields (address, tax_id) are excluded and weights auto-normalize."
+          }
+        },
+        {
+          "name": "Resolve — Name-Only Partial Match",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fields\": {\n    \"name\": \"Shanghai Steel\"\n  },\n  \"threshold\": 0.5\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/profiles/supplier-dedup/resolve",
+              "host": ["{{base_url}}"],
+              "path": ["profiles", "supplier-dedup", "resolve"]
+            },
+            "description": "Tests partial matching with only 1 of 5 fields provided. Only name (SEMANTIC, w=5) contributes — weight normalizes to 100% of composite. Demonstrates graceful handling when most fields are missing."
+          }
+        },
+        {
+          "name": "Resolve — New Supplier (Create If Missing)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fields\": {\n    \"name\": \"Alpine Engineering AG\",\n    \"address\": \"Bahnhofstrasse 10\",\n    \"city\": \"Zurich\",\n    \"country\": \"Switzerland\",\n    \"tax_id\": \"CHE-999.888.777\"\n  },\n  \"threshold\": 0.9,\n  \"create_if_missing\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/profiles/supplier-dedup/resolve",
+              "host": ["{{base_url}}"],
+              "path": ["profiles", "supplier-dedup", "resolve"]
+            },
+            "description": "Resolves with all 5 fields and high threshold (0.9). If no match found, creates a new supplier entity. All fields are stored in field_values VARIANT, and SEMANTIC embeddings are auto-generated for the 'name' field."
+          }
+        },
+        {
+          "name": "Bulk Load — 3 Suppliers",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"entities\": [\n    {\n      \"field_values\": {\n        \"name\": \"Nordic Supply AB\",\n        \"address\": \"Storgatan 15\",\n        \"city\": \"Stockholm\",\n        \"country\": \"Sweden\",\n        \"tax_id\": \"SE-556677-8899\"\n      },\n      \"metadata\": {\"source\": \"erp_import\"}\n    },\n    {\n      \"field_values\": {\n        \"name\": \"Osaka Manufacturing Ltd\",\n        \"address\": \"2-1 Umeda\",\n        \"city\": \"Osaka\",\n        \"country\": \"Japan\",\n        \"tax_id\": \"JP-1234567890123\"\n      },\n      \"metadata\": {\"source\": \"erp_import\"}\n    },\n    {\n      \"field_values\": {\n        \"name\": \"Rio Industrial SA\",\n        \"address\": \"Av Paulista 1000\",\n        \"city\": \"Sao Paulo\",\n        \"country\": \"Brazil\",\n        \"tax_id\": \"BR-12.345.678/0001-90\"\n      },\n      \"metadata\": {\"source\": \"erp_import\"}\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/profiles/supplier-dedup/entities",
+              "host": ["{{base_url}}"],
+              "path": ["profiles", "supplier-dedup", "entities"]
+            },
+            "description": "Bulk loads 3 new supplier entities without matching (insert-only). Generates SEMANTIC field embeddings for name field. Used for initial data seeding or ERP imports."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Resolution — Person Profile",
+      "description": "Person matching using PHONETIC (SOUNDEX), FUZZY, EXACT, and NUMERIC strategies.",
+      "item": [
+        {
+          "name": "Resolve — Phonetic Name + Email",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fields\": {\n    \"first_name\": \"Jon\",\n    \"last_name\": \"Smith\",\n    \"email\": \"john.smith@acme.com\"\n  },\n  \"threshold\": 0.5\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/profiles/person-match/resolve",
+              "host": ["{{base_url}}"],
+              "path": ["profiles", "person-match", "resolve"]
+            },
+            "description": "Tests PHONETIC matching on first_name (Jon → John via SOUNDEX J500) combined with EXACT email match. 'Jon' and 'John' share the same SOUNDEX code, so first_name scores 1.0 via phonetic match. Email EXACT (w=5) provides strong signal."
+          }
+        },
+        {
+          "name": "Resolve — Phone Dedup (Numeric)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fields\": {\n    \"first_name\": \"J\",\n    \"last_name\": \"Smith\",\n    \"phone\": \"1-555-0101\"\n  },\n  \"threshold\": 0.3\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/profiles/person-match/resolve",
+              "host": ["{{base_url}}"],
+              "path": ["profiles", "person-match", "resolve"]
+            },
+            "description": "Tests NUMERIC phone matching. '1-555-0101' is stripped to digits '15550101' and compared against stored phone numbers. Low threshold (0.3) allows partial matches from phone + last_name even with abbreviated first_name."
+          }
+        },
+        {
+          "name": "Resolve — Last Name Fuzzy",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fields\": {\n    \"last_name\": \"Muller\",\n    \"first_name\": \"Hans\"\n  },\n  \"threshold\": 0.5\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/profiles/person-match/resolve",
+              "host": ["{{base_url}}"],
+              "path": ["profiles", "person-match", "resolve"]
+            },
+            "description": "Tests FUZZY matching on last_name (w=4). 'Muller' should fuzzy-match 'Mueller' or 'Muller' via normalized edit distance. Only 2 of 5 fields provided — weights auto-normalize to first_name (w=3) + last_name (w=4)."
+          }
+        },
+        {
+          "name": "Resolve Batch — 3 People",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"entities\": [\n    {\n      \"fields\": {\n        \"first_name\": \"Robert\",\n        \"last_name\": \"Johnson\",\n        \"email\": \"bob.johnson@corp.com\"\n      },\n      \"threshold\": 0.5\n    },\n    {\n      \"fields\": {\n        \"first_name\": \"Maria\",\n        \"last_name\": \"Garcia\",\n        \"phone\": \"555-0202\"\n      },\n      \"threshold\": 0.5\n    },\n    {\n      \"fields\": {\n        \"first_name\": \"Wei\",\n        \"last_name\": \"Zhang\",\n        \"email\": \"w.zhang@company.cn\",\n        \"phone\": \"86-10-5550303\"\n      },\n      \"threshold\": 0.4\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/profiles/person-match/resolve/batch",
+              "host": ["{{base_url}}"],
+              "path": ["profiles", "person-match", "resolve", "batch"]
+            },
+            "description": "Batch resolves 3 people with different field combinations: name+email, name+phone, and name+email+phone. Each uses different field subsets, testing partial matching weight normalization."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Legacy (Backward Compatible)",
+      "description": "Original /match endpoints for backward compatibility. Internally routes through the 'company' ResolveIQ profile.",
+      "item": [
+        {
+          "name": "Legacy Match — IBM",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"IBM\",\n  \"threshold\": 0.65\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/match",
+              "host": ["{{base_url}}"],
+              "path": ["match"]
+            },
+            "description": "Legacy exact match. Internally adapts to POST /profiles/company/resolve with fields={name:'IBM'}. Returns flat MatchResult with canonical_name, match_score, match_type."
+          }
+        },
+        {
+          "name": "Legacy Match — Microsft (Fuzzy)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Microsft\",\n  \"threshold\": 0.5\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/match",
+              "host": ["{{base_url}}"],
+              "path": ["match"]
+            },
+            "description": "Legacy fuzzy match with misspelled name. Should match 'Microsoft Corporation' via hybrid fuzzy+semantic scoring."
+          }
+        },
+        {
+          "name": "Legacy Match — Wal Mart",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Wal Mart\",\n  \"threshold\": 0.5\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/match",
+              "host": ["{{base_url}}"],
+              "path": ["match"]
+            },
+            "description": "Legacy fuzzy match. Tests tokenization differences — 'Wal Mart' vs 'Walmart' should still match via fuzzy or semantic similarity."
+          }
+        },
+        {
+          "name": "Legacy Batch — 3 Companies",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"entities\": [\n    {\"name\": \"Apple Inc\", \"threshold\": 0.6},\n    {\"name\": \"Amazn\", \"threshold\": 0.5},\n    {\"name\": \"Johnson and Johnson\", \"threshold\": 0.65}\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/match/batch",
+              "host": ["{{base_url}}"],
+              "path": ["match", "batch"]
+            },
+            "description": "Legacy batch match. Processes 3 companies sequentially through the legacy adapter. Returns total_processed, results array, and total_execution_ms."
+          }
+        },
+        {
+          "name": "Legacy Cache Invalidation",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/cache",
+              "host": ["{{base_url}}"],
+              "path": ["cache"]
+            },
+            "description": "Clears both Redis (riq:* and em:* keys) and Snowflake caches (expired profile_match_cache rows + INVALIDATE_CACHE procedure). Returns details of what was cleared."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Cache & Admin",
+      "description": "Cache management and administrative operations.",
+      "item": [
+        {
+          "name": "Invalidate Profile Cache — Company",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/profiles/company/cache",
+              "host": ["{{base_url}}"],
+              "path": ["profiles", "company", "cache"]
+            },
+            "description": "Clears cached match results scoped to the 'company' profile only. Both Redis keys and Snowflake profile_match_cache rows for this profile are purged."
+          }
+        },
+        {
+          "name": "Invalidate All Caches (Global)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/cache",
+              "host": ["{{base_url}}"],
+              "path": ["cache"]
+            },
+            "description": "Global cache invalidation across all profiles. Clears Redis (riq:* and legacy em:* keys) and Snowflake caches. Use after data migrations or bulk loads."
+          }
+        },
+        {
+          "name": "Verify All Profiles",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/profiles",
+              "host": ["{{base_url}}"],
+              "path": ["profiles"]
+            },
+            "description": "Final verification — lists all active profiles to confirm system state after all operations. Should show company, supplier-dedup, and person-match profiles."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Error Cases",
+      "description": "Negative test cases verifying proper error handling and validation.",
+      "item": [
+        {
+          "name": "404 — Resolve Nonexistent Profile",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fields\": {\n    \"name\": \"Test\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/profiles/nonexistent/resolve",
+              "host": ["{{base_url}}"],
+              "path": ["profiles", "nonexistent", "resolve"]
+            },
+            "description": "Expected: 404 Not Found. Profile slug 'nonexistent' doesn't exist. Verifies proper error response with message."
+          }
+        },
+        {
+          "name": "422 — Resolve Empty Fields",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fields\": {}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/profiles/company/resolve",
+              "host": ["{{base_url}}"],
+              "path": ["profiles", "company", "resolve"]
+            },
+            "description": "Expected: 422 Unprocessable Entity. Empty fields dict violates the min_length=1 Pydantic validation on fields. Verifies request validation."
+          }
+        },
+        {
+          "name": "422 — Legacy Match Empty Name",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/match",
+              "host": ["{{base_url}}"],
+              "path": ["match"]
+            },
+            "description": "Expected: 422 Unprocessable Entity. Empty name string fails min_length=1 validation on MatchRequest.name. Tests legacy endpoint validation."
+          }
+        },
+        {
+          "name": "422 — Batch Resolve Empty Array",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"entities\": []\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/profiles/company/resolve/batch",
+              "host": ["{{base_url}}"],
+              "path": ["profiles", "company", "resolve", "batch"]
+            },
+            "description": "Expected: 422 Unprocessable Entity. Empty entities array fails min_length=1 validation on BatchResolveRequest.entities."
+          }
+        },
+        {
+          "name": "422 — Create Profile Invalid Strategy",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"profile_name\": \"Bad Profile\",\n  \"entity_type\": \"Test\",\n  \"fields\": [\n    {\n      \"field_name\": \"test_field\",\n      \"match_strategy\": \"INVALID_STRATEGY\",\n      \"weight\": 1.0\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/profiles",
+              "host": ["{{base_url}}"],
+              "path": ["profiles"]
+            },
+            "description": "Expected: 422 Unprocessable Entity. 'INVALID_STRATEGY' is not a valid match_strategy. Valid values: EXACT, FUZZY, SEMANTIC, PHONETIC, NUMERIC, NONE."
+          }
+        }
+      ]
+    }
+  ]
+}
