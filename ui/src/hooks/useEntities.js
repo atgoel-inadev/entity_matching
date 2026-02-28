@@ -3,6 +3,7 @@ import { listEntities } from '../api/entities';
 
 export default function useEntities(slug, limit = 50) {
   const [entities, setEntities] = useState([]);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(!!slug);
   const [error, setError] = useState(null);
   const [offset, setOffset] = useState(0);
@@ -14,7 +15,9 @@ export default function useEntities(slug, limit = 50) {
     setError(null);
     try {
       const data = await listEntities(slug, limit, o);
-      setEntities(data);
+      // API returns paginated response: { entities: [...], total, limit, offset }
+      setEntities(data.entities || []);
+      setTotal(data.total || 0);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -30,5 +33,5 @@ export default function useEntities(slug, limit = 50) {
     fetch(newOffset);
   };
 
-  return { entities, loading, error, offset, goToPage, refetch: () => fetch(offset) };
+  return { entities, total, loading, error, offset, goToPage, refetch: () => fetch(offset) };
 }

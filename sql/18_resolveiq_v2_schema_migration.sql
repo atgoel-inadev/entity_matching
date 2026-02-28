@@ -1,0 +1,290 @@
+-- =============================================================================
+-- RESOLVEIQ v2.1: Schema Migration
+-- =============================================================================
+-- Changes from v1 → v2.1:
+--   1. resolution_profiles  — default_threshold updated to 0.95
+--   2. profile_entities     — add salesforce_id (primary return ID), gen3_id,
+--                             source_system, last_synced_at, embedding_status
+--   3. entity_alias         — NEW TABLE for Manual Review alias mappings
+--   4. profile_match_log    — add resolution_scenario, confidence_score,
+--                             salesforce_id, source_system, correlation_id,
+--                             request_payload, candidate_count, threshold_used,
+--                             model_version, profile_snapshot_ts,
+--                             entities_snapshot_ts, input_hash, error columns
+--   5. profile_match_cache  — DEPRECATED (replaced by Redis L1 + LRU L0)
+--
+-- Run order: after scripts 10–17.
+-- Safe to re-run: all ADD COLUMN statements use IF NOT EXISTS.
+-- =============================================================================
+
+USE ROLE SNOWFLAKE_LEARNING_ROLE;
+USE WAREHOUSE SNOWFLAKE_LEARNING_WH;
+USE DATABASE SNOWFLAKE_LEARNING_DB;
+USE SCHEMA ENTITY_MATCHING;
+
+-- =============================================================================
+-- PRE-STEP: Drop FK constraint that causes "ambiguous column name 'SOURCE_SYSTEM'"
+-- Both profile_entities and resolution_profiles have SOURCE_SYSTEM columns.
+-- The existing FK causes Snowflake to join tables during ALTER validation.
+-- =============================================================================
+ALTER TABLE profile_entities DROP CONSTRAINT FK_ENTITIES_PROFILE;
+
+-- =============================================================================
+-- STEP 1: resolution_profiles — update default threshold to 0.95
+-- EXACT_MATCH (=1.0) and HIGH_CONFIDENCE (>=0.95) are auto-accepted by callers.
+-- LOW_CONFIDENCE (<0.95) and NO_MATCH (=0) route to Manual Review.
+-- =============================================================================
+-- NOTE: Snowflake does not support ALTER COLUMN SET DEFAULT.
+-- To change the default, recreate the column or handle at application layer.
+-- Existing rows retain their values; new inserts should specify 0.95 explicitly.
+
+COMMENT ON COLUMN resolution_profiles.default_threshold IS
+    'Confidence threshold. EXACT_MATCH=1.0 and HIGH_CONFIDENCE>=0.95 are auto-accepted by callers. LOW_CONFIDENCE<0.95 and NO_MATCH=0 route to Manual Review. Default changed from 0.65 (v1) to 0.95 (v2.1).';
+
+-- Add source_system to profiles — which SoR backs this profile
+ALTER TABLE resolution_profiles ADD COLUMN IF NOT EXISTS source_system VARCHAR(20) DEFAULT 'Salesforce';
+ALTER TABLE resolution_profiles ADD COLUMN IF NOT EXISTS external_id_field VARCHAR(100);
+ALTER TABLE resolution_profiles ADD COLUMN IF NOT EXISTS allow_authoritative_create BOOLEAN DEFAULT FALSE;
+
+COMMENT ON COLUMN resolution_profiles.source_system IS
+    'System of Record backing this profile: Salesforce | Gen3 | Manual.';
+COMMENT ON COLUMN resolution_profiles.external_id_field IS
+    'Field name in field_values that stores the SoR ID (e.g. sf_buyer_id).';
+COMMENT ON COLUMN resolution_profiles.allow_authoritative_create IS
+    'FALSE = engine never creates records in the SoR directly; callers do.';
+
+
+-- =============================================================================
+-- STEP 2: profile_entities — add source identity columns
+--
+-- salesforce_id is THE primary identifier returned by getMatchingEntity.
+-- Internal entity_id is never surfaced to callers.
+-- =============================================================================
+
+ALTER TABLE profile_entities ADD COLUMN IF NOT EXISTS salesforce_id VARCHAR(50);
+ALTER TABLE profile_entities ADD COLUMN IF NOT EXISTS gen3_id VARCHAR(100);
+ALTER TABLE profile_entities ADD COLUMN IF NOT EXISTS source_system VARCHAR(20) DEFAULT 'Manual';
+ALTER TABLE profile_entities ADD COLUMN IF NOT EXISTS last_synced_at TIMESTAMP_NTZ;
+ALTER TABLE profile_entities ADD COLUMN IF NOT EXISTS embedding_status VARCHAR(20) DEFAULT 'EMBEDDED';
+
+COMMENT ON COLUMN profile_entities.salesforce_id IS
+    'PRIMARY RETURN ID — Salesforce record ID (e.g. 001Dn000003GhXx). Returned as salesforceId in MatchingEntityResult. NULL for Gen3-only or manually-created entities.';
+
+COMMENT ON COLUMN profile_entities.gen3_id IS
+    'Gen3 PostgreSQL source record ID. Populated when source_system = Gen3.';
+
+COMMENT ON COLUMN profile_entities.source_system IS
+    'Authoritative source: Salesforce | Gen3 | Manual.';
+
+COMMENT ON COLUMN profile_entities.last_synced_at IS
+    'Timestamp of last copy from the source system (SF or Gen3 hourly ETL).';
+
+COMMENT ON COLUMN profile_entities.embedding_status IS
+    'PENDING = synced from source but embeddings not yet generated by EmbeddingRefreshJob. EMBEDDED = embeddings are current. EmbeddingRefreshJob processes PENDING records on the next hourly cycle.';
+
+-- Unique constraint: one salesforce_id per profile (null allowed for non-SF entities)
+-- Note: Snowflake UNIQUE allows multiple NULLs by default.
+-- Commented out: causes "ambiguous column name 'SOURCE_SYSTEM'" if profile_entities
+-- has an existing FK to resolution_profiles (both tables have SOURCE_SYSTEM column).
+-- ALTER TABLE profile_entities
+--     ADD CONSTRAINT uq_profile_salesforce_id
+--         UNIQUE (profile_id, salesforce_id);
+
+-- Fast lookup by salesforce_id
+-- Note: If this fails with "ambiguous column name 'SOURCE_SYSTEM'", 
+-- the table may have an FK to another table with SOURCE_SYSTEM column.
+-- Run separately after dropping/disabling that FK constraint.
+ALTER TABLE profile_entities
+    ADD SEARCH OPTIMIZATION ON EQUALITY(salesforce_id);
+
+
+-- =============================================================================
+-- STEP 3: entity_alias — NEW TABLE
+--
+-- Created during Manual Review when a user links unrecognized field values
+-- to a canonical Salesforce record. Picked up by EmbeddingRefreshJob hourly.
+-- Checked as STEP 0 of every getMatchingEntity call (alias always wins).
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS entity_alias (
+    alias_id                    VARCHAR(36)   NOT NULL DEFAULT UUID_STRING(),
+    profile_id                  VARCHAR(36)   NOT NULL,
+    salesforce_id               VARCHAR(50)   NOT NULL,
+    display_name                VARCHAR(500)  NOT NULL,
+
+    -- JSON field values that resolve to salesforce_id
+    -- e.g. {"buyer_name": "Acme Corp.", "email": "ap@acme.com"}
+    alias_fields                VARIANT       NOT NULL,
+
+    -- SHA2_HEX of JSON.stringify(Object.fromEntries(sorted(aliasFields.entries())))
+    -- Pre-computed by Node.js on insert; used for O(1) alias lookup.
+    alias_fields_hash           VARCHAR(64)   NOT NULL,
+
+    created_by                  VARCHAR(200)  NOT NULL,
+    created_from_correlation_id VARCHAR(200),
+    embedding_status            VARCHAR(20)   NOT NULL DEFAULT 'PENDING',
+    is_active                   BOOLEAN       NOT NULL DEFAULT TRUE,
+    created_at                  TIMESTAMP_NTZ NOT NULL DEFAULT CURRENT_TIMESTAMP(),
+    updated_at                  TIMESTAMP_NTZ NOT NULL DEFAULT CURRENT_TIMESTAMP(),
+
+    CONSTRAINT pk_entity_alias PRIMARY KEY (alias_id)
+);
+
+-- FK constraint commented out: Snowflake FKs are not enforced, and the inline
+-- constraint causes "ambiguous column name 'SOURCE_SYSTEM'" during validation
+-- when both entity_alias and resolution_profiles have SOURCE_SYSTEM columns.
+-- ALTER TABLE entity_alias
+--     ADD CONSTRAINT fk_alias_profile FOREIGN KEY (profile_id)
+--         REFERENCES resolution_profiles(profile_id);
+
+COMMENT ON TABLE entity_alias IS
+    'Maps known alternative field values to a canonical Salesforce ID. Created via Manual Review UI when a user accepts a LOW_CONFIDENCE candidate or manually links a NO_MATCH to an existing SF record. EmbeddingRefreshJob embeds alias_fields hourly (PENDING → EMBEDDED). AliasChecker queries this table as step 0 of every getMatchingEntity call; an alias match always returns EXACT_MATCH (confidenceScore=1.0).';
+
+COMMENT ON COLUMN entity_alias.alias_fields_hash IS
+    'SHA2_HEX(JSON.stringify(sortedAliasFields)) — computed by Node.js before insert. Used for O(1) lookup: AliasChecker hashes input fields and matches this column.';
+
+COMMENT ON COLUMN entity_alias.embedding_status IS
+    'PENDING = alias_fields not yet embedded. EmbeddingRefreshJob runs hourly; after embedding, status becomes EMBEDDED and semantic search can find this alias.';
+
+-- Cluster + optimize for fast AliasChecker queries
+ALTER TABLE entity_alias
+    CLUSTER BY (profile_id, embedding_status);
+
+ALTER TABLE entity_alias
+    ADD SEARCH OPTIMIZATION ON EQUALITY(profile_id, alias_fields_hash, salesforce_id);
+
+
+-- =============================================================================
+-- STEP 4: profile_match_log — add v2.1 columns
+--
+-- Old columns (match_score, match_type, input_fields) are retained during
+-- the transition window. New columns replace them for all v2 writes.
+-- =============================================================================
+
+ALTER TABLE profile_match_log ADD COLUMN IF NOT EXISTS profile_slug VARCHAR(100);
+ALTER TABLE profile_match_log ADD COLUMN IF NOT EXISTS source_system VARCHAR(20);
+ALTER TABLE profile_match_log ADD COLUMN IF NOT EXISTS correlation_id VARCHAR(200);
+ALTER TABLE profile_match_log ADD COLUMN IF NOT EXISTS request_payload VARIANT;
+ALTER TABLE profile_match_log ADD COLUMN IF NOT EXISTS input_hash VARCHAR(64);
+ALTER TABLE profile_match_log ADD COLUMN IF NOT EXISTS salesforce_id VARCHAR(50);
+ALTER TABLE profile_match_log ADD COLUMN IF NOT EXISTS confidence_score NUMBER(5,4);
+ALTER TABLE profile_match_log ADD COLUMN IF NOT EXISTS resolution_scenario VARCHAR(30);
+ALTER TABLE profile_match_log ADD COLUMN IF NOT EXISTS candidate_count INTEGER DEFAULT 0;
+ALTER TABLE profile_match_log ADD COLUMN IF NOT EXISTS threshold_used NUMBER(5,4) DEFAULT 0.9500;
+ALTER TABLE profile_match_log ADD COLUMN IF NOT EXISTS model_version VARCHAR(50);
+ALTER TABLE profile_match_log ADD COLUMN IF NOT EXISTS profile_snapshot_ts TIMESTAMP_NTZ;
+ALTER TABLE profile_match_log ADD COLUMN IF NOT EXISTS entities_snapshot_ts TIMESTAMP_NTZ;
+ALTER TABLE profile_match_log ADD COLUMN IF NOT EXISTS error_code VARCHAR(50);
+ALTER TABLE profile_match_log ADD COLUMN IF NOT EXISTS error_message VARCHAR(2000);
+
+COMMENT ON COLUMN profile_match_log.resolution_scenario IS
+    'Business outcome: EXACT_MATCH | HIGH_CONFIDENCE | LOW_CONFIDENCE | NO_MATCH. EXACT_MATCH and HIGH_CONFIDENCE are auto-accepted by callers (Gen3, SF). LOW_CONFIDENCE and NO_MATCH route to Manual Review. Replaces old match_type column for all v2 writes.';
+
+COMMENT ON COLUMN profile_match_log.salesforce_id IS
+    'The Salesforce ID returned as the primary identifier. NULL for NO_MATCH (no entity found above threshold).';
+
+COMMENT ON COLUMN profile_match_log.confidence_score IS
+    'Composite match score 0.0–1.0. Replaces old match_score column for v2 writes.';
+
+COMMENT ON COLUMN profile_match_log.source_system IS
+    'Which system called getMatchingEntity: Salesforce | Gen3 | AdminUI.';
+
+COMMENT ON COLUMN profile_match_log.input_hash IS
+    'SHA2_HEX of sorted input fields — used for replay and regression testing.';
+
+COMMENT ON COLUMN profile_match_log.entities_snapshot_ts IS
+    'Timestamp of the last entity sync from SF/Gen3 at the time of resolution. Used with profile_snapshot_ts to replay a decision against a specific data state.';
+
+COMMENT ON COLUMN profile_match_log.candidate_count IS
+    'Number of candidates returned to the caller. Non-zero for LOW_CONFIDENCE only.';
+
+-- Backfill resolution_scenario + confidence_score from legacy v1 columns
+-- so existing data is consistent with v2 query patterns.
+UPDATE profile_match_log
+SET
+    confidence_score    = match_score,
+    resolution_scenario = CASE
+        WHEN match_score = 1.0   THEN 'EXACT_MATCH'
+        WHEN match_score >= 0.95 THEN 'HIGH_CONFIDENCE'
+        WHEN match_score > 0     THEN 'LOW_CONFIDENCE'
+        ELSE                          'NO_MATCH'
+    END
+WHERE resolution_scenario IS NULL
+  AND match_score IS NOT NULL;
+
+-- Index for common audit queries: by profile + scenario + date
+ALTER TABLE profile_match_log
+    ADD SEARCH OPTIMIZATION ON EQUALITY(profile_id, resolution_scenario, salesforce_id);
+
+
+-- =============================================================================
+-- STEP 5: profile_match_cache — DEPRECATED
+--
+-- Replaced by Redis L1 (TTL 3600s, auto-expires each hourly sync cycle)
+-- and in-process LRU L0 cache. The Node.js engine no longer writes to this
+-- table. Retained for historical data. Drop after 90-day transition window.
+-- =============================================================================
+
+COMMENT ON TABLE profile_match_cache IS
+    '[DEPRECATED — v2.1] Replaced by Redis L1 + in-process LRU L0. The Node.js engine does not read from or write to this table. Retained for historical data access during transition. Schedule DROP TABLE after 90-day retention window expires.';
+
+
+-- =============================================================================
+-- VERIFICATION
+-- =============================================================================
+
+-- 1. New columns on profile_entities
+SELECT
+    column_name,
+    data_type,
+    column_default,
+    comment
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE table_schema = 'ENTITY_MATCHING'
+  AND table_name   = 'PROFILE_ENTITIES'
+  AND column_name IN ('SALESFORCE_ID','GEN3_ID','SOURCE_SYSTEM',
+                      'LAST_SYNCED_AT','EMBEDDING_STATUS')
+ORDER BY ordinal_position;
+
+-- 2. entity_alias table structure
+SELECT
+    column_name,
+    data_type,
+    is_nullable,
+    column_default
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE table_schema = 'ENTITY_MATCHING'
+  AND table_name   = 'ENTITY_ALIAS'
+ORDER BY ordinal_position;
+
+-- 3. New columns on profile_match_log
+SELECT
+    column_name,
+    data_type,
+    comment
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE table_schema = 'ENTITY_MATCHING'
+  AND table_name   = 'PROFILE_MATCH_LOG'
+  AND column_name IN ('RESOLUTION_SCENARIO','CONFIDENCE_SCORE',
+                      'SALESFORCE_ID','SOURCE_SYSTEM','CORRELATION_ID',
+                      'CANDIDATE_COUNT','THRESHOLD_USED','ENTITIES_SNAPSHOT_TS')
+ORDER BY ordinal_position;
+
+-- 4. Backfill check — all v1 rows should now have resolution_scenario
+SELECT
+    resolution_scenario,
+    COUNT(*) AS row_count
+FROM profile_match_log
+GROUP BY resolution_scenario
+ORDER BY row_count DESC;
+
+-- 5. Table inventory
+SELECT table_name, row_count, comment
+FROM INFORMATION_SCHEMA.TABLES
+WHERE table_schema = 'ENTITY_MATCHING'
+  AND table_name IN ('PROFILE_ENTITIES','ENTITY_ALIAS',
+                     'PROFILE_MATCH_LOG','PROFILE_MATCH_CACHE',
+                     'RESOLUTION_PROFILES')
+ORDER BY table_name;
+
+

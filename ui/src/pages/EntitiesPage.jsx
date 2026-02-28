@@ -8,6 +8,7 @@ import useProfile from '../hooks/useProfile';
 import useEntities from '../hooks/useEntities';
 import { bulkLoadEntities, deleteEntity } from '../api/entities';
 import EntityTable from '../components/entities/EntityTable';
+import EntityDetailDrawer from '../components/entities/EntityDetailDrawer';
 import EntityBulkUpload from '../components/entities/EntityBulkUpload';
 import ConfirmDialog from '../components/common/ConfirmDialog';
 import LoadingOverlay from '../components/common/LoadingOverlay';
@@ -17,10 +18,11 @@ export default function EntitiesPage() {
   const navigate = useNavigate();
   const { enqueueSnackbar } = useSnackbar();
   const { profile, loading: profileLoading } = useProfile(slug);
-  const { entities, loading: entitiesLoading, offset, goToPage, refetch } = useEntities(slug);
+  const { entities, total, loading: entitiesLoading, offset, goToPage, refetch } = useEntities(slug);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [selectedEntity, setSelectedEntity] = useState(null);
 
   const page = Math.floor(offset / 50);
 
@@ -77,12 +79,21 @@ export default function EntitiesPage() {
       ) : (
         <EntityTable
           entities={entities}
+          total={total}
           onDelete={(e) => setDeleteTarget(e)}
+          onRowClick={(e) => setSelectedEntity(e)}
           page={page}
           onPageChange={goToPage}
           profileFields={profile?.fields}
         />
       )}
+
+      <EntityDetailDrawer
+        entity={selectedEntity}
+        open={!!selectedEntity}
+        onClose={() => setSelectedEntity(null)}
+        profileFields={profile?.fields}
+      />
 
       <EntityBulkUpload
         open={uploadOpen}

@@ -13,6 +13,7 @@ import ProfileSelector from '../components/resolve/ProfileSelector';
 import DynamicFieldForm from '../components/resolve/DynamicFieldForm';
 import ThresholdSlider from '../components/resolve/ThresholdSlider';
 import ResultsTable from '../components/resolve/ResultsTable';
+import MatchDetailDrawer from '../components/resolve/MatchDetailDrawer';
 import LoadingOverlay from '../components/common/LoadingOverlay';
 
 export default function ResolvePage() {
@@ -29,6 +30,8 @@ export default function ResolvePage() {
   const [resolving, setResolving] = useState(false);
   const [findingSimilar, setFindingSimilar] = useState(false);
   const [error, setError] = useState(null);
+  const [selectedMatch, setSelectedMatch] = useState(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
   // Auto-select profile from URL
   useEffect(() => {
@@ -122,6 +125,17 @@ export default function ResolvePage() {
     } finally {
       setFindingSimilar(false);
     }
+  };
+
+  const handleRowClick = (matchResult) => {
+    setSelectedMatch(matchResult);
+    setDrawerOpen(true);
+  };
+
+  const handleDrawerClose = () => {
+    setDrawerOpen(false);
+    // Clear selected match after drawer animation completes
+    setTimeout(() => setSelectedMatch(null), 300);
   };
 
   return (
@@ -225,7 +239,11 @@ export default function ResolvePage() {
                 )}
               </Stack>
             </Box>
-            <ResultsTable results={results} profileFields={profileDetail?.fields} />
+            <ResultsTable 
+              results={results} 
+              profileFields={profileDetail?.fields}
+              onRowClick={handleRowClick}
+            />
           </CardContent>
         </Card>
       )}
@@ -247,12 +265,25 @@ export default function ResolvePage() {
             </Box>
             <Alert severity="info" sx={{ mb: 2 }}>
               Showing all entities matching above the threshold, sorted by match score. 
-              Expand rows to see field-level score breakdowns.
+              Click any row to view detailed information.
             </Alert>
-            <ResultsTable results={similarEntities} profileFields={profileDetail?.fields} />
+            <ResultsTable 
+              results={similarEntities} 
+              profileFields={profileDetail?.fields}
+              onRowClick={handleRowClick}
+            />
           </CardContent>
         </Card>
       )}
+
+      {/* Match Detail Drawer */}
+      <MatchDetailDrawer
+        matchResult={selectedMatch}
+        profileSlug={profileDetail?.profile_slug}
+        open={drawerOpen}
+        onClose={handleDrawerClose}
+        profileFields={profileDetail?.fields}
+      />
     </Box>
   );
 }

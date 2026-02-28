@@ -9,14 +9,18 @@ import ScoreBadge from '../common/ScoreBadge';
 import MatchTypeBadge from '../common/MatchTypeBadge';
 import FieldScoreBreakdown from './FieldScoreBreakdown';
 
-function ResultRow({ result, profileFields }) {
+function ResultRow({ result, profileFields, onRowClick }) {
   const [open, setOpen] = useState(false);
   const hasBreakdown = result.field_scores && Object.keys(result.field_scores).filter(k => k !== '_fastpath').length > 0;
 
   return (
     <>
-      <TableRow hover>
-        <TableCell padding="checkbox">
+      <TableRow 
+        hover 
+        onClick={() => onRowClick(result)}
+        sx={{ cursor: 'pointer' }}
+      >
+        <TableCell padding="checkbox" onClick={(e) => e.stopPropagation()}>
           {hasBreakdown && (
             <IconButton size="small" onClick={() => setOpen(!open)}>
               {open ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
@@ -55,7 +59,7 @@ function ResultRow({ result, profileFields }) {
   );
 }
 
-export default function ResultsTable({ results, profileFields }) {
+export default function ResultsTable({ results, profileFields, onRowClick }) {
   if (!results || results.length === 0) return null;
 
   return (
@@ -73,7 +77,7 @@ export default function ResultsTable({ results, profileFields }) {
         </TableHead>
         <TableBody>
           {results.map((r, i) => (
-            <ResultRow key={r.entity_id || i} result={r} profileFields={profileFields} />
+            <ResultRow key={r.entity_id || i} result={r} profileFields={profileFields} onRowClick={onRowClick} />
           ))}
         </TableBody>
       </Table>

@@ -4,7 +4,7 @@ import {
 } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 
-export default function EntityTable({ entities, onDelete, page, onPageChange, profileFields }) {
+export default function EntityTable({ entities, total, onDelete, onRowClick, page, onPageChange, profileFields }) {
   return (
     <TableContainer component={Paper} variant="outlined">
       <Table size="small">
@@ -19,7 +19,12 @@ export default function EntityTable({ entities, onDelete, page, onPageChange, pr
         </TableHead>
         <TableBody>
           {entities.map((e) => (
-            <TableRow key={e.entity_id} hover>
+            <TableRow
+              key={e.entity_id}
+              hover
+              onClick={() => onRowClick && onRowClick(e)}
+              sx={{ cursor: 'pointer' }}
+            >
               <TableCell>
                 <Typography variant="body2" fontWeight={600}>{e.display_name}</Typography>
               </TableCell>
@@ -38,7 +43,14 @@ export default function EntityTable({ entities, onDelete, page, onPageChange, pr
                 <Typography variant="caption">{e.created_at?.slice(0, 10) || '-'}</Typography>
               </TableCell>
               <TableCell align="right">
-                <IconButton size="small" color="error" onClick={() => onDelete(e)}>
+                <IconButton
+                  size="small"
+                  color="error"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onDelete(e);
+                  }}
+                >
                   <DeleteIcon fontSize="small" />
                 </IconButton>
               </TableCell>
@@ -57,12 +69,11 @@ export default function EntityTable({ entities, onDelete, page, onPageChange, pr
       </Table>
       <TablePagination
         component="div"
-        count={-1}
+        count={total || 0}
         rowsPerPage={50}
         page={page}
         onPageChange={(_, p) => onPageChange(p)}
         rowsPerPageOptions={[50]}
-        labelDisplayedRows={({ from, to }) => `${from}-${to}`}
       />
     </TableContainer>
   );
