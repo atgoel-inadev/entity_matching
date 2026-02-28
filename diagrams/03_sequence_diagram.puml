@@ -1,0 +1,296 @@
+@startuml ResolveIQ_SequenceDiagram
+
+skinparam backgroundColor #FAFAFA
+skinparam defaultFontName "Segoe UI"
+skinparam defaultFontSize 12
+skinparam sequenceArrowThickness 1.5
+skinparam sequenceGroupBackgroundColor #E3F2FD
+skinparam sequenceGroupBorderColor #1565C0
+skinparam sequenceGroupBodyBackgroundColor #FAFAFA
+skinparam noteBackgroundColor #FFFDE7
+skinparam noteBorderColor #F9A825
+skinparam participantBackgroundColor #E8F5E9
+skinparam participantBorderColor #2E7D32
+skinparam sequenceDividerBackgroundColor #E0E0E0
+
+title **ResolveIQ — Gen3 Buyer Resolution: Full Sequence Diagram**\n//POST /profiles/buyer-match/resolve · Covers: Happy Path + NEW_ENTITY + Audit Logging//
+
+' ─────────────────────────────────────
+' PARTICIPANTS
+' ─────────────────────────────────────
+participant "**Gen3**\n(Transactional App)" as GEN3      #C8E6C9
+participant "**Gen3 DB**\n(PostgreSQL)"       as GEN3DB   #E8F5E9
+participant "**FastAPI**\nresolve.py"         as API      #E0F2F1
+participant "**cache.py**\n(Redis L1)"        as CACHE    #FFF9C4
+database    "**Redis**"                       as REDIS    #FCE4EC
+participant "**snowflake.py**\n(Snowpark)"    as SFPY     #E8EAF6
+database    "**Snowflake DB**"                as SFDB     #E8EAF6
+participant "**RESOLVE_AND_\nUPSERT()**"      as PROC     #EDE7F6
+participant "**resolve_entity\n() UDTF**"     as UDTF     #D0D0EE
+participant "**compute_\nfield_score()**"     as SCORE    #F3E5F5
+participant "**Cortex AI**\nEMBED_TEXT_768"   as AI       #EDE7F6
+participant "**Salesforce**\n(SoR)"           as SF       #FFE4B2
+participant "**Case / Jira\nWorkflow**"       as CASE     #F3E5F5
+
+' ═══════════════════════════════════════════════════════
+' SECTION 0: SETUP — Profile configured by Admin
+' ═══════════════════════════════════════════════════════
+== 0. Admin Pre-Configuration (one-time — out of band) ==
+
+note over API, SFDB #E8F5E9
+  Admin configures buyer-match profile via Admin Console:
+  slug=buyer-match · source_system=Salesforce · external_id_field=sf_buyer_id
+  allow_authoritative_create=false
+  Fields: buyer_name_semantic (SEMANTIC,4.0) · buyer_name_fuzzy (FUZZY,2.0)
+          email (EXACT,4.0) · phone (NUMERIC,2.0) · tax_id (EXACT,3.0)
+          country (EXACT,1.0) · city (FUZZY,1.0)
+  Weights and strategies stored in profile_fields — managed by Admin only.
+end note
+
+note over SFDB #FFF3E0
+  Salesforce → Snowflake buyers_raw mirror:
+  Full nightly sync + incremental by last_modified_at.
+  REFRESH_PROFILE_FROM_MIRROR() builds profile_entities + embeddings.
+end note
+
+' ═══════════════════════════════════════════════════════
+' SECTION 1: GEN3 INITIATES A RESOLVE CALL
+' ═══════════════════════════════════════════════════════
+== 1. Gen3 Transaction — Resolve Request ==
+
+GEN3 -> GEN3 : New transaction arrives;\nBuyer attributes available:\nbyer_name="Jon Smith", email="john.smith@acme.com"\nphone="15550101010", tax_id="364567890", city="Chicago"
+
+GEN3 -> GEN3 : Generate correlation_id = "txn-2024-98765"\n(links transaction → resolution event → audit)
+
+GEN3 -> API : POST /profiles/buyer-match/resolve\n{\n  fields: {\n    buyer_name_semantic: "Jon Smith",\n    buyer_name_fuzzy: "Jon Smith",\n    email: "john.smith@acme.com",\n    phone: "15550101010",\n    tax_id: "364567890",\n    city: "Chicago"\n  },\n  threshold: 0.65,\n  correlation_id: "txn-2024-98765",\n  source_system: "gen3"\n}
+
+' ═══════════════════════════════════════════════════════
+' SECTION 2: VALIDATION + L1 CACHE CHECK
+' ═══════════════════════════════════════════════════════
+== 2. API Validation & L1 Cache Lookup ==
+
+API -> API : Validate request (Pydantic v2)\nExtract correlation_id
+
+API -> SFDB : SELECT profile_id, default_threshold,\n  source_system, external_id_field,\n  allow_authoritative_create\nFROM resolution_profiles\nWHERE profile_slug = 'buyer-match'
+SFDB --> API : profile_id, threshold=0.65\nsource_system=Salesforce · external_id_field=sf_buyer_id\nallow_authoritative_create=false
+
+API -> CACHE : build_cache_key(\n  profile_id, fields, threshold\n)
+note right of CACHE : Key = riq:{profile_id}:{md5(sorted_fields+threshold)}
+
+API -> REDIS : GET cache_key
+REDIS --> API : result
+
+alt Cache HIT (L1 Redis) — repeated identical query
+  note over API, REDIS #C8E6C9
+    Cache HIT — return immediately  (<5ms)
+    Audit still written (was_cached=true)
+  end note
+  API -> SFDB : INSERT profile_match_log\n(correlation_id, was_cached=true,\n match_score, match_type, external_id)
+  API --> GEN3 : 200 { entity_id, sf_buyer_id, match_score,\n  match_type, field_scores,\n  was_cached:true, execution_ms:3 }
+else Cache MISS — proceed to Snowflake
+  note over API, REDIS #FFCCBC : Cache MISS — invoke Snowflake procedure
+end
+
+' ═══════════════════════════════════════════════════════
+' SECTION 3: SNOWFLAKE — RESOLVE_AND_UPSERT()
+' ═══════════════════════════════════════════════════════
+== 3. Snowflake — RESOLVE_AND_UPSERT() ==
+
+API -> SFPY : session.sql(\n  "CALL RESOLVE_AND_UPSERT(?,?,?,?,?,?)",\n  [profile_id, fields_json, metadata,\n   threshold, false, correlation_id]\n)
+
+SFPY -> PROC : Execute stored procedure
+activate PROC
+
+' ── L2 cache check ──────────────────────────────────────
+PROC -> SFDB : ① SELECT * FROM profile_match_cache\nWHERE profile_id=? AND cache_key=?\n  AND expires_at > CURRENT_TIMESTAMP()
+SFDB --> PROC : (empty — cache miss)
+
+' ── EXACT fast-path ─────────────────────────────────────
+group EXACT Fast-Path  (weight≥3.0 EXACT fields: email·tax_id)
+  PROC -> SFDB : ② Fetch high-weight EXACT fields\nfrom profile_fields WHERE weight≥3.0
+  SFDB --> PROC : [email: EXACT w=4.0, tax_id: EXACT w=3.0]
+  PROC -> PROC : Normalize email → lowercase\nNormalize tax_id → digits-only "364567890"
+  PROC -> SFDB : SELECT entity_id, display_name, sf_buyer_id\nFROM profile_entities\nWHERE profile_id=?\n  AND UPPER(field_values:email) = 'JOHN.SMITH@ACME.COM'\n  AND field_values:tax_id = '364567890'
+  SFDB --> PROC : (null — no exact match on both fields)
+  note right of PROC : Fast-path MISS;\nfall through to full UDTF scoring
+end
+
+' ── Full scoring UDTF ───────────────────────────────────
+group Full Scoring Pipeline — resolve_entity() UDTF
+
+  PROC -> UDTF : ③ TABLE(resolve_entity(\n  profile_id, fields_json, threshold=0.65\n))
+  activate UDTF
+
+  UDTF -> SFDB : Fetch all active entities for buyer-match profile\n(field_values VARIANT + embedding VECTOR(FLOAT,768))
+  SFDB --> UDTF : N buyer entity records
+
+  loop For each candidate buyer entity
+    UDTF -> UDTF : Parse field_values from VARIANT JSON
+
+    loop For each profile field (7 fields)
+
+      UDTF -> SCORE : compute_field_score(\n  strategy, norm_input, norm_entity_val\n  embedding_input, embedding_entity\n)
+      activate SCORE
+
+      alt buyer_name_semantic → SEMANTIC
+        SCORE -> AI : EMBED_TEXT_768("Jon Smith")
+        AI --> SCORE : input_embedding VECTOR(FLOAT,768)
+        SCORE -> SCORE : VECTOR_COSINE_SIMILARITY(\n  input_embedding, entity_embedding\n)
+      else buyer_name_fuzzy → FUZZY
+        SCORE -> SCORE : Levenshtein("Jon Smith", "John Smith")\n→ ratio = 0.91
+      else email → EXACT
+        SCORE -> SCORE : UPPER(a) == UPPER(b) → 1.0 or 0.0
+      else phone → NUMERIC
+        SCORE -> SCORE : digits_only(a) vs digits_only(b)\n→ 1 - |diff| / max
+      else tax_id → EXACT
+        SCORE -> SCORE : digits(a) == digits(b) → 1.0 or 0.0
+      else country → EXACT
+        SCORE -> SCORE : exact match → 1.0 or 0.0
+      else city → FUZZY
+        SCORE -> SCORE : Levenshtein ratio
+      end
+
+      SCORE --> UDTF : field_score ∈ [0.0, 1.0]
+      deactivate SCORE
+
+    end
+
+    UDTF -> UDTF : composite =\n  SUM(score_i × weight_i) / SUM(weight_i for provided fields)
+    UDTF -> UDTF : Classify match_type:\n  email exact+high → HYBRID_HIGH\n  composite only → COMPOSITE
+    UDTF -> UDTF : Filter: composite ≥ 0.65
+
+  end
+
+  UDTF -> UDTF : ORDER BY composite DESC\nRETURN top match
+  deactivate UDTF
+
+end
+
+' ═══════════════════════════════════════════════════════
+' DECISION BRANCH — MATCH FOUND vs NEW_ENTITY
+' ═══════════════════════════════════════════════════════
+== 4. Decision: Match Found or NEW_ENTITY ==
+
+UDTF --> PROC : top result (or null)
+
+' ─── HAPPY PATH ─────────────────────────────────────────
+alt MATCH FOUND — composite ≥ threshold
+  note over PROC #C8E6C9
+    HAPPY PATH: Existing buyer found
+    match_type = HYBRID_HIGH
+    entity maps to a Salesforce sf_buyer_id
+  end note
+
+  PROC -> SFDB : ④a INSERT INTO profile_match_cache\n(cache_key, result_json, expires_at=NOW()+300s)
+
+  PROC -> SFDB : ④b INSERT INTO profile_match_log\n(\n  correlation_id = "txn-2024-98765",\n  profile_slug = "buyer-match",\n  source_system = "gen3",\n  request_payload = {fields JSON},\n  match_entity_id = "uuid-...",\n  external_system = "Salesforce",\n  external_id = "0031X00001BcDeFGHI",   -- sf_buyer_id\n  match_score = 0.94,\n  match_type = "HYBRID_HIGH",\n  field_scores = {email:1.0, tax_id:1.0,\n                  buyer_name_semantic:0.93,\n                  buyer_name_fuzzy:0.91,\n                  phone:0.88, city:0.85},\n  is_new_entity = false,\n  is_authoritative = true,\n  model_version = "e5-base-v2-v1",\n  profile_snapshot_ts = <ts>,\n  entities_snapshot_ts = <ts>\n)
+  note right of SFDB #C8E6C9 : AUDIT WRITTEN — HAPPY PATH
+
+  PROC --> SFPY : JSON result
+  deactivate PROC
+  SFPY --> API : { entity_id, sf_buyer_id,\n  match_score:0.94, match_type:"HYBRID_HIGH",\n  field_scores:{...}, is_new_entity:false,\n  is_authoritative:true, execution_ms:85 }
+
+  API -> REDIS : SET cache_key result EX 300
+  note right of REDIS : L1 Redis write — future identical\nqueries served from cache
+
+  API --> GEN3 : 200 OK\n{\n  entity_id: "uuid-...",\n  sf_buyer_id: "0031X00001BcDeFGHI",\n  display_name: "John Smith",\n  match_score: 0.94,\n  match_type: "HYBRID_HIGH",\n  field_scores: { email:1.0, tax_id:1.0,\n    buyer_name_semantic:0.93, ... },\n  is_new_entity: false,\n  is_authoritative: true,\n  was_cached: false,\n  correlation_id: "txn-2024-98765",\n  execution_ms: 88\n}
+
+  GEN3 -> GEN3 : Match meets policy thresholds\n→ accept as authoritative match
+  GEN3 -> GEN3DB : Attach sf_buyer_id to transaction\n→ mark transaction READY\n→ auto-process / unblock
+
+' ─── NEW ENTITY PATH ────────────────────────────────────
+else NO MATCH — composite < threshold (NEW_ENTITY)
+
+  note over PROC #FFCCBC
+    NEW_ENTITY PATH: No adequate match found
+    allow_authoritative_create = false (Salesforce-backed profile)
+    → Return NEW_ENTITY, do NOT auto-create SoR record
+  end note
+
+  PROC -> SFDB : ④c INSERT INTO profile_match_log\n(\n  correlation_id = "txn-2024-98765",\n  profile_slug = "buyer-match",\n  source_system = "gen3",\n  request_payload = {fields JSON},\n  match_entity_id = null,\n  external_system = "Salesforce",\n  external_id = null,\n  match_score = 0.41,   -- best score below threshold\n  match_type = "NEW_ENTITY",\n  field_scores = {buyer_name_fuzzy:0.42, city:0.30, ...},\n  is_new_entity = true,\n  is_authoritative = false,\n  model_version = "e5-base-v2-v1",\n  error_code = null\n)
+  note right of SFDB #FFE0B2 : AUDIT WRITTEN — NEW_ENTITY PATH
+
+  PROC --> SFPY : { match_type:"NEW_ENTITY",\n  is_new_entity:true,\n  is_authoritative:false,\n  match_score:0.41,\n  field_scores:{...},\n  entity_id:null,\n  sf_buyer_id:null }
+  deactivate PROC
+
+  SFPY --> API : NEW_ENTITY result
+  API --> GEN3 : 200 OK\n{\n  match_type: "NEW_ENTITY",\n  is_new_entity: true,\n  is_authoritative: false,\n  entity_id: null,\n  sf_buyer_id: null,\n  match_score: 0.41,\n  field_scores: { buyer_name_fuzzy:0.42, ... },\n  correlation_id: "txn-2024-98765",\n  execution_ms: 110\n}
+
+  == 5. Gen3 NEW_ENTITY Workflow ==
+
+  GEN3 -> GEN3DB : ① PARK transaction\n(status=PENDING_ENTITY_RESOLUTION)\nStore correlation_id + best_match_score
+
+  GEN3 -> GEN3 : ② Evaluate routing policy\n(profile=buyer-match · country=USA\n → owner_team=Client_Management\n → queue=new_buyer_sf_case)
+
+  GEN3 -> CASE : ③ Open Salesforce Case / Jira ticket\n{\n  transaction_id: "txn-2024-98765",\n  new_entity_request_id: "NER-00123",\n  candidate_name: "Jon Smith",\n  candidate_email: "john.smith@acme.com",\n  candidate_phone: "15550101010",\n  candidate_tax_id: "364567890",\n  best_match_score: 0.41,\n  field_scores: { ... },\n  owner_team: "Client_Management",\n  priority: "NORMAL"\n}
+  note right of CASE : Auto-notification sent\nto assigned team by email / Slack
+
+  CASE -> SF : ④ Business owner reviews candidate\n  • Enriches / de-duplicates in Salesforce\n  • Performs KYC / compliance checks\n  • If valid: creates NEW Salesforce record
+
+  SF --> CASE : New sf_buyer_id assigned:\n"0031X00001XyZWVUTSR"\nCase/Jira marked RESOLVED\nLinked to NER-00123
+
+  note over SF #FFE4B2
+    Salesforce is SoR — this is the authoritative create.
+    ResolveIQ never creates Salesforce records directly.
+  end note
+
+  == 6. Mirror Sync & ResolveIQ Ingest ==
+
+  SF -> SFDB : Salesforce → Snowflake sync\n(buyers_raw upsert:\nsf_buyer_id, buyer_name, email,\nphone, tax_id, city, country, last_modified_at)
+
+  SFDB -> SFDB : REFRESH_PROFILE_FROM_MIRROR(\n  profile_id=buyer-match,\n  since=last_sync_ts\n)\n→ INSERT/UPDATE profile_entities\n  (entity_id, sf_buyer_id, field_values)\n→ EMBED_TEXT_768() for SEMANTIC fields
+  note right of SFDB : New buyer now in profile_entities\nwith embedding + sf_buyer_id
+
+  == 7. Gen3 Transaction Unblocked ==
+
+  SFDB -> GEN3 : Webhook / event: entity ready\n{ new_entity_request_id: "NER-00123",\n  sf_buyer_id: "0031X00001XyZWVUTSR" }
+
+  GEN3 -> GEN3DB : ⑤ Update parked transaction:\n  sf_buyer_id = "0031X00001XyZWVUTSR"\n  status = READY\n  resolved_via = "NEW_ENTITY_WORKFLOW"
+  GEN3 -> GEN3 : Unblock / requeue transaction\n→ auto-process with authoritative SoR id
+
+  note over GEN3, SFDB #E8F5E9
+    End-to-end traceability:
+    transaction_id → correlation_id → profile_match_log (log_id)
+         → NER-00123 (new_entity_request) → Salesforce Case id
+         → sf_buyer_id (authoritative SoR record)
+  end note
+
+end
+
+' ═══════════════════════════════════════════════════════
+' SECTION 8: ERROR / FALLBACK
+' ═══════════════════════════════════════════════════════
+== 8. Error Handling & Fallback ==
+
+note over GEN3, API #FCE4EC
+  If ResolveIQ is unavailable / slow (timeout):
+    Gen3 falls back to exact PostgreSQL checks (email / tax_id lookup in Gen3 DB).
+    Resolution attempt logged with error_code="RESOLVEIQ_TIMEOUT" in profile_match_log.
+    Transaction proceeds with degraded matching; flagged for later enrichment.
+
+  If borderline score (near threshold):
+    Gen3 routing policy routes to manual review queue with match details.
+    Not auto-accepted · not auto-rejected.
+end note
+
+' ═══════════════════════════════════════════════════════
+' AUDIT SUMMARY NOTE
+' ═══════════════════════════════════════════════════════
+note over SFDB #FFE0B2
+  **profile_match_log — Audit Coverage**
+  ────────────────────────────────────────────────────────────────────────
+  Happy Path:  log_id · timestamp_utc · correlation_id · profile_slug · source_system
+               match_entity_id · external_id (sf_buyer_id) · match_score · match_type
+               field_scores VARIANT · is_new_entity=false · is_authoritative=true
+               model_version · profile_snapshot_ts · entities_snapshot_ts
+  ────────────────────────────────────────────────────────────────────────
+  NEW_ENTITY:  Same columns + is_new_entity=true · is_authoritative=false
+               external_id=null · joinable to NER and Salesforce Case via correlation_id
+  ────────────────────────────────────────────────────────────────────────
+  Reproducibility: request_payload + model_version + profile_snapshot_ts
+                   + entities_snapshot_ts → decisions can be re-scored/replayed
+  Access control: Snowflake RBAC — dedicated read-only/admin roles
+                  PII kept out of application logs; correlation_id used to join
+end note
+
+@enduml

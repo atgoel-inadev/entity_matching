@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/INILPTP193/OneDrive - inadev.com/Workspace/**)",
+      "Read(//c/Users/INILPTP193/.claude/projects/c--Users-INILPTP193-OneDrive---inadev-com-Workspace-entity-matching/memory/**)",
+      "Bash(npm install)",
+      "Bash(npm run build)",
+      "Bash(npm test)"
+    ]
+  }
+}

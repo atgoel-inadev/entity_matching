@@ -1,0 +1,254 @@
+@startuml ResolveIQ_ComponentDiagram
+
+skinparam backgroundColor #FAFAFA
+skinparam defaultFontName "Segoe UI"
+skinparam defaultFontSize 11
+skinparam componentStyle rectangle
+skinparam linetype ortho
+skinparam wrapWidth 160
+skinparam padding 5
+skinparam nodesep 40
+skinparam ranksep 50
+
+skinparam package {
+  BackgroundColor #F5F5F5
+  BorderColor #9E9E9E
+  BorderThickness 1.5
+  FontStyle bold
+  FontSize 12
+}
+skinparam component {
+  BackgroundColor White
+  BorderColor #546E7A
+  BorderThickness 1.5
+  FontSize 11
+}
+skinparam database {
+  BackgroundColor #E8EAF6
+  BorderColor #3949AB
+  FontSize 10
+}
+skinparam actor {
+  BackgroundColor #B3E5FC
+  BorderColor #0288D1
+}
+skinparam rectangle {
+  BackgroundColor #FFE4B2
+  BorderColor #E65100
+  FontSize 11
+}
+skinparam arrowColor #37474F
+skinparam arrowThickness 1.4
+skinparam noteBackgroundColor #FFFDE7
+skinparam noteBorderColor #FBC02D
+
+title **ResolveIQ — Component Diagram**\n//C4 Level 2 — All layers and external integrations//
+
+' ═══════════════════════════════════════════════════════
+' EXTERNAL ACTORS & SYSTEMS
+' ═══════════════════════════════════════════════════════
+actor "Admin\n(Platform Team)" as ADMIN
+actor "Gen3\nApplication" as GEN3ACT
+
+rectangle "Salesforce\n(System of Record)" as SF_EXT
+rectangle "Gen3\nPostgreSQL" as GEN3DB_EXT
+rectangle "Case / Jira\nWorkflow" as WORKFLOW_EXT
+
+' ═══════════════════════════════════════════════════════
+' LAYER 1: ADMIN CONSOLE
+' ═══════════════════════════════════════════════════════
+package "Admin Console  ·  React 18 + MUI v5  ·  Port 5173" as FE #EEF7FF {
+
+  package "Pages" as Pages {
+    [Dashboard] as Dash
+    [Profiles\n(grid + detail)] as PPage
+    [Entities\n(table + bulk upload)] as EPage
+    [Seed Data] as SPage
+    [Resolve\n(eval screen)] as RPage
+  }
+
+  package "Resolve Components" as RC {
+    [ProfileSelector] as PSel
+    [DynamicFieldForm] as DFF
+    [ThresholdSlider] as TSlider
+    [ResultsTable] as RTable
+    [FieldScoreBreakdown] as FSB
+  }
+
+  package "API Client" as APICL {
+    [axios client] as AxCl
+    [profiles.js\nentities.js] as APE
+    [resolve.js\nhealth.js] as ARH
+  }
+}
+
+' ═══════════════════════════════════════════════════════
+' LAYER 2: FASTAPI BACKEND
+' ═══════════════════════════════════════════════════════
+package "FastAPI Backend  ·  Python 3.12  ·  Port 8001" as BE #EFF8EE {
+
+  package "Middleware" as MW {
+    [CORS\nMiddleware] as CORS
+    [Request\nLogger] as RLOG
+  }
+
+  package "Routers" as Routers {
+    [profiles.py\nAdmin: CRUD profiles,\nfields, weights] as PRR
+    [resolve.py\nPOST /{slug}/resolve\nPOST /{slug}/resolve/batch\nPOST/GET /{slug}/entities] as RRR
+    [legacy.py\nPOST /match\nGET /health · /stats] as LRR
+  }
+
+  package "Services" as Svcs {
+    [snowflake.py\nSnowpark session pool] as SFSC
+    [cache.py\nbuild_cache_key()\nget / set / clear] as CSC
+    [audit.py\nwrite_audit_log()\n→ profile_match_log] as AUDSVC
+  }
+
+  package "Models  ·  Pydantic v2" as Mdls {
+    [Profile Models\nProfileCreate/Update/Response\nFieldConfig · FieldUpdate\n+ source_system · external_id_field] as PM
+    [Resolution Models\nResolveRequest · ResolveResult\nBatchResolve*\n+ correlation_id · external_id] as RM
+    [Entity Models\nEntityRecord · EntityResponse\nBulkLoadRequest/Result] as EM
+  }
+}
+
+' ═══════════════════════════════════════════════════════
+' LAYER 3: CACHE
+' ═══════════════════════════════════════════════════════
+package "Cache Layer" as CL #FFF9E6 {
+  database "Redis  (L1)\nTTL=300s  ·  <5ms\nKey: riq:{profile_id}:{md5}" as REDIS
+  database "profile_match_cache  (L2)\nSnowflake table\nexpires_at · SQL lookup" as SFCACHE
+}
+
+' ═══════════════════════════════════════════════════════
+' LAYER 4: SNOWFLAKE
+' ═══════════════════════════════════════════════════════
+package "Snowflake Data Cloud" as SF #EEEEF8 {
+
+  package "Salesforce Mirror  (Source Tables)" as SFMIRROR #FFF3E0 {
+    database "buyers_raw\nsf_buyer_id · buyer_name · email\nphone · tax_id · city · country\nlast_modified_at" as BUYERS_RAW
+    database "suppliers_raw\nsf_supplier_id · name · tax_id\ncity · country · last_modified_at" as SUPP_RAW
+  }
+
+  package "Resolution Tables" as TABS #DDDDF0 {
+    database "resolution_profiles\nslug · entity_type · threshold\nsource_system · external_id_field\nallow_authoritative_create" as T1
+    database "profile_fields\nfield_name · match_strategy\nweight · field_order · is_required" as T2
+    database "profile_entities\nentity_id · profile_id\ndisplay_name · field_values VARIANT\nembedding VECTOR(FLOAT,768)\nexternal_id (e.g. sf_buyer_id)" as T3
+    database "profile_match_cache\ncache_key · result_json\nexpires_at" as T4
+  }
+
+  package "Audit Table" as AUDTAB #FFE0B2 {
+    database "profile_match_log\nlog_id · timestamp_utc · correlation_id\nprofile_slug · source_system\nrequest_payload VARIANT\nmatch_entity_id · external_id\nmatch_score · match_type\nfield_scores VARIANT\nis_new_entity · is_authoritative\nmodel_version · profile_snapshot_ts\nentities_snapshot_ts" as AUDITLOG
+  }
+
+  package "UDFs" as UDFS #D5D5EE {
+    [normalize_field_value()\nEXACT/FUZZY/PHONETIC → UPPER+strip\nNUMERIC → digits-only\nSEMANTIC → lowercase trim] as UDF1
+    [compute_field_score()\nEXACT → 0|1\nFUZZY → Levenshtein\nSEMANTIC → cosine similarity\nPHONETIC → Metaphone\nNUMERIC → abs-diff ratio] as UDF2
+  }
+
+  package "UDTF" as UDTFF #D0D0EE {
+    [resolve_entity(profile_id, fields, threshold)\n1. Normalize inputs\n2. Scan profile_entities\n3. compute_field_score() per field\n4. Composite = SUM(score×w)/SUM(w)\n5. Filter ≥ threshold\n6. YIELD: entity_id · external_id\n   composite_score · match_type] as UDTF1
+  }
+
+  package "Stored Procedures" as PROCS #C8C8E8 {
+    [RESOLVE_AND_UPSERT()\n① L2 cache check\n② EXACT fast-path (w≥3.0)\n③ resolve_entity() UDTF\n④ NEW_ENTITY if no match\n⑤ Write L2 cache + audit log\n⑥ Return JSON result] as P1
+    [BULK_LOAD_ENTITIES()\nBatch INSERT to profile_entities\nEmbed SEMANTIC fields] as P2
+    [REFRESH_PROFILE_FROM_MIRROR()\nUpsert from Salesforce mirror\nRe-embed changed entities\n(nightly + incremental)] as P3
+    [INVALIDATE_PROFILE_CACHE()\nDELETE profile_match_cache] as P4
+    [GENERATE_RIQ_MONITORING\n_REPORT()\nVolume · cache rate · latency\nNEW_ENTITY rate] as P5
+  }
+
+  package "Cortex AI" as CORTEX #C0C0E0 {
+    [EMBED_TEXT_768()\ne5-base-v2 model\n768-dim VECTOR(FLOAT,768)\nSEMANTIC fields + ingest] as CEMB
+    [VECTOR_COSINE_SIMILARITY()\nnative Snowflake vector op\nreturns 0.0–1.0] as CVCS
+  }
+}
+
+' ═══════════════════════════════════════════════════════
+' CONNECTIONS — Actors
+' ═══════════════════════════════════════════════════════
+ADMIN --> FE : configure\nprofiles & weights
+GEN3ACT --> RRR : POST /{slug}/resolve\n(+ correlation_id)
+
+' ─── NEW_ENTITY downstream (orange)
+RRR -[#FF6D00]-> GEN3ACT : match_type=NEW_ENTITY
+GEN3ACT -[#FF6D00]-> GEN3DB_EXT : park transaction\ncreate NER
+GEN3ACT -[#FF6D00]-> WORKFLOW_EXT : open Case/Jira
+WORKFLOW_EXT -[#FF6D00]-> SF_EXT : business owner\ncreates SoR record
+SF_EXT -[#FF6D00]-> BUYERS_RAW : SF→Snowflake sync
+BUYERS_RAW -[#FF6D00]-> P3 : trigger ingest refresh
+
+' ═══════════════════════════════════════════════════════
+' CONNECTIONS — Admin UI internal
+' ═══════════════════════════════════════════════════════
+RPage --> PSel
+RPage --> DFF
+RPage --> TSlider
+RPage --> RTable
+RTable --> FSB
+APE --> AxCl
+ARH --> AxCl
+
+' ═══════════════════════════════════════════════════════
+' CONNECTIONS — Frontend → Backend
+' ═══════════════════════════════════════════════════════
+AxCl -down-> PRR : CRUD /profiles/**
+AxCl -down-> RRR : POST /{slug}/resolve
+AxCl -down-> LRR : GET /health · /stats
+
+' ═══════════════════════════════════════════════════════
+' CONNECTIONS — Backend internal
+' ═══════════════════════════════════════════════════════
+PRR --> SFSC
+PRR --> PM
+RRR --> SFSC
+RRR --> CSC
+RRR --> AUDSVC
+RRR --> RM
+RRR --> EM
+LRR --> SFSC
+LRR --> CSC
+
+' ═══════════════════════════════════════════════════════
+' CONNECTIONS — Backend → Cache + Snowflake
+' ═══════════════════════════════════════════════════════
+CSC -down-> REDIS : L1 read/write
+PRR -down-> T1 : profile CRUD
+PRR -down-> T2 : field weights\n& strategies
+RRR -down-> P1 : CALL RESOLVE_AND_UPSERT()
+RRR -down-> P2 : CALL BULK_LOAD_ENTITIES()
+RRR -down-> P5 : CALL MONITORING_REPORT()
+AUDSVC -down-> AUDITLOG : INSERT audit row\n(every resolution)
+
+' ═══════════════════════════════════════════════════════
+' CONNECTIONS — Snowflake internal
+' ═══════════════════════════════════════════════════════
+P1 --> T4 : L2 cache check/write
+P1 --> AUDITLOG : audit INSERT
+P1 --> UDTF1 : TABLE(resolve_entity(...))
+P1 --> UDF1 : normalize inputs
+P2 --> T3 : batch INSERT
+P2 --> CEMB : embed SEMANTIC fields
+P3 --> T3 : upsert from mirror
+P3 --> CEMB : re-embed changed
+UDTF1 --> UDF2 : compute_field_score()
+UDTF1 --> T3 : scan candidates
+UDF2 --> CEMB : SEMANTIC: embed input
+UDF2 --> CVCS : cosine_similarity()
+T4 -down-> SFCACHE
+
+' ═══════════════════════════════════════════════════════
+' LEGEND
+' ═══════════════════════════════════════════════════════
+legend right
+  |= Symbol      |= Meaning |
+  | <#FF6D00> ──► | NEW_ENTITY downstream flow |
+  | ──►           | Normal data/control flow |
+  |= Key Rule     |= Detail |
+  | SoR alignment | allow_authoritative_create=false for Salesforce profiles |
+  | Composite Score | SUM(score_i × weight_i) / SUM(weight_i for provided fields) |
+  | EXACT fast-path | EXACT field weight≥3.0 → bypass UDTF if matched (<50ms) |
+  | Audit | Every resolve → profile_match_log (RBAC-protected, PII-free) |
+  | Weights/Strategies | Managed by Admin only via profiles.py router |
+endlegend
+
+@enduml

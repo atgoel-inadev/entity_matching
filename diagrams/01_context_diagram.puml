@@ -1,0 +1,108 @@
+@startuml ResolveIQ_ContextDiagram
+
+skinparam backgroundColor #FAFAFA
+skinparam defaultFontName "Segoe UI"
+skinparam defaultFontSize 12
+skinparam linetype ortho
+skinparam wrapWidth 160
+skinparam padding 6
+skinparam nodesep 50
+skinparam ranksep 60
+
+skinparam rectangle {
+  BorderThickness 2
+  FontSize 12
+}
+skinparam actor {
+  BackgroundColor #B3E5FC
+  BorderColor #0288D1
+  FontSize 12
+}
+skinparam arrowColor #37474F
+skinparam arrowThickness 1.6
+skinparam noteBackgroundColor #FFFDE7
+skinparam noteBorderColor #F9A825
+
+title **ResolveIQ — System Context Diagram**\n//C4 Level 1 — Actors, systems, and information flows//
+
+' ─────────────────────────────────────
+' ACTORS
+' ─────────────────────────────────────
+actor "**Admin**\n(Platform Team)" as ADMIN #B3E5FC
+actor "**Gen3**\nApplication" as GEN3 #C8E6C9
+
+' ─────────────────────────────────────
+' CENTRAL SYSTEM
+' ─────────────────────────────────────
+rectangle "**ResolveIQ**\n─────────────────────\nCentral entity resolution service.\nAnswers: existing Salesforce entity\nor new candidate?\n• Sub-100ms p95 latency\n• 6 match strategies per field\n• Two-tier cache (Redis + Snowflake)\n• Full audit trail (profile_match_log)" as SYSTEM #FFE0B2
+
+' ─────────────────────────────────────
+' SUPPORTING SYSTEMS
+' ─────────────────────────────────────
+rectangle "**Admin Console**\nReact + MUI · Port 5173\n─────────────────────\nProfile config, field weights,\nbulk ingest, eval screen.\nAdmin role only." as ADMINUI #E8F5E9
+
+rectangle "**FastAPI Backend**\nPython 3.12 · Port 8001\n─────────────────────\n3 routers · 15 Pydantic v2 models\nSnowpark pool · audit writer" as API #E0F2F1
+
+rectangle "**Salesforce**\nSystem of Record (SoR)\n─────────────────────\nAuthoritative source for buyers,\nsuppliers, accounts.\nResolveIQ never creates/edits here." as SFSOR #FFE4B2
+
+rectangle "**Gen3 PostgreSQL**\nTransactional Database\n─────────────────────\nHolds transactions.\nParks records pending\nNEW_ENTITY resolution.\nStores New Entity Requests." as GEN3DB #E8F5E9
+
+rectangle "**Snowflake**\nData Cloud + AI Engine\n─────────────────────\nMirrors Salesforce entities.\nRuns UDFs, UDTF, procedures.\nCortex AI embeddings.\nHolds profile_match_log (audit)." as SNOW #E8EAF6
+
+rectangle "**Redis**\nL1 In-Memory Cache\n─────────────────────\nTTL = 300s  ·  <5ms hit\nKey: riq:{profile_id}:{md5}" as REDIS #FCE4EC
+
+rectangle "**Case / Jira\nWorkflow**\n─────────────────────\nNEW_ENTITY review tickets.\nBusiness team: enrich,\nKYC, de-dup, create SoR record." as WORKFLOW #F3E5F5
+
+rectangle "**Cortex AI**\ne5-base-v2 · EMBED_TEXT_768\n─────────────────────\n768-dim vector embeddings\nVECTOR_COSINE_SIMILARITY" as CORTEX #EDE7F6
+
+' ─────────────────────────────────────
+' NORMAL FLOWS
+' ─────────────────────────────────────
+ADMIN --> ADMINUI : configure profiles\n& field weights
+GEN3 --> API : POST /profiles/buyer-match/resolve\n{fields, threshold, correlation_id}
+
+ADMINUI --> API : HTTP REST (Axios)
+API --> SNOW : Snowpark SQL\n& stored procedures
+API --> REDIS : L1 cache read/write
+
+SFSOR --> SNOW : Salesforce → Snowflake sync\n(nightly full + incremental)
+SNOW --> CORTEX : EMBED_TEXT_768()\nfor SEMANTIC fields
+
+' ─────────────────────────────────────
+' HAPPY PATH RETURN
+' ─────────────────────────────────────
+API --> GEN3 #2E7D32 : [MATCH] entity_id + sf_buyer_id\nmatch_score · match_type\nfield_scores · correlation_id
+GEN3 --> GEN3DB #2E7D32 : attach sf_buyer_id\n→ process transaction
+
+' ─────────────────────────────────────
+' NEW_ENTITY PATH (orange)
+' ─────────────────────────────────────
+API -[#FF6D00]-> GEN3 : [NEW_ENTITY]\nmatch_type=NEW_ENTITY\nis_new_entity=true · sf_buyer_id=null
+GEN3 -[#FF6D00]-> GEN3DB : park transaction\ncreate New Entity Request
+GEN3 -[#FF6D00]-> WORKFLOW : open Case/Jira ticket\n(candidate details + correlation_id)
+WORKFLOW -[#FF6D00]-> SFSOR : business owner creates\nnew authoritative SoR record
+SFSOR -[#FF6D00]-> SNOW : Salesforce → Snowflake sync\n(new sf_buyer_id in mirror)
+SNOW -[#FF6D00]-> SNOW : REFRESH_PROFILE_FROM_MIRROR()\nnew entity ingested + embedded
+SNOW -[#FF6D00]-> GEN3 : webhook: entity ready\n(sf_buyer_id available)
+GEN3 -[#FF6D00]-> GEN3DB : update parked transaction\nwith authoritative sf_buyer_id\n→ unblock processing
+
+' ─────────────────────────────────────
+' AUDIT
+' ─────────────────────────────────────
+API --> SNOW : INSERT profile_match_log\n(every resolution — both paths)
+
+legend right
+  |= Flow colour    |= Meaning |
+  | <#2E7D32> ──►   | Happy path — existing entity matched |
+  | <#FF6D00> ──►   | NEW_ENTITY path — no adequate match |
+  | ──►              | Normal data / config flow |
+  |= Key principle   |= Detail |
+  | SoR rule         | ResolveIQ matches Salesforce mirror — never replaces Salesforce as SoR |
+  | Actors           | Admin (profile/weight config) · Gen3 (API consumer — no human actor) |
+  | Strategies       | EXACT · FUZZY · SEMANTIC (AI) · PHONETIC · NUMERIC · NONE |
+  | Scoring          | SUM(score_i × weight_i) / SUM(weight_i for provided fields) |
+  | EXACT fast-path  | EXACT field weight≥3.0 → <50ms early return |
+  | Audit            | profile_match_log: every call logged with correlation_id + sf_external_id |
+endlegend
+
+@enduml
