@@ -1,0 +1,29 @@
+docker run --rm -v ${PWD}:/work -w /work grafana/k6:latest run --env BASE_URL=http://host.docker.internal:8001 engine/performance/k6/resolution.perf.js 2>&1 | Select-String -Pattern "p\(50\)|p\(90\)|p\(95\)|p\(99\)|http_req_failed|resolution_errors|cache_hit"
+
+
+Here are the commands to check your k6 performance test results:
+
+if (Test-Path "summary.html") { Write-Host "✅ HTML report found: summary.html" -ForegroundColor Green; Write-Host "`nOpening in browser..." -ForegroundColor Cyan; Start-Process "summary.html" } else { Write-Host "❌ HTML report not found. Test may have been interrupted." -ForegroundColor Red; Write-Host "`nRe-run the test with:" -ForegroundColor Yellow; Write-Host "docker run --rm -v `${PWD}:/work -w /work grafana/k6:latest run --env BASE_URL=http://host.docker.internal:8001 engine/performance/k6/resolution.perf.js" -ForegroundColor White }
+Great! The HTML report was found and opened in your browser! 🎉
+
+Here are additional commands to analyze the results:
+
+1. View quick summary in terminal:
+
+2. Run test with JSON output for analysis:
+
+3. Check if test is still running:
+
+4. View the HTML report again:
+
+5. Run a quick smoke test (30 seconds, 1 VU):
+
+The summary.html file now open in your browser contains:
+
+📊 Visual percentile charts (p50, p90, p95, p99)
+📈 Request rate graphs
+⏱️ Latency breakdown by scenario (EXACT, FUZZY, SEMANTIC, BATCH)
+✅ Pass/fail status for all thresholds
+💾 Cache hit rate statistics
+❌ Error rate analysis
+Claude Sonnet 4.5 • 1x

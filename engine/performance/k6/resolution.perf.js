@@ -1,8 +1,13 @@
 /**
- * K6 Performance Test — ResolveIQ v2 Resolution Pipeline
+ * K6 Performance Test — ResolveIQ v2 Resolution Pipeline (100+ Entities)
  *
  * Measures p50, p90, p95, p99 latency for the resolution endpoint under
- * concurrent load ramping up to 10 virtual users (VUs).
+ * concurrent load ramping up to 20 virtual users (VUs).
+ *
+ * Test Coverage:
+ *   • 100+ unique entity variations
+ *   • Multiple field combinations (tax_id, name, city, address, country, etc.)
+ *   • 4 pipeline scenarios: EXACT, FUZZY, SEMANTIC, BATCH
  *
  * Scenarios exercised per VU (round-robin by VU index):
  *   • EXACT fast-path   — tax_id + name exact match → bypasses embedding pipeline
@@ -12,20 +17,23 @@
  *
  * Usage:
  *   k6 run resolution.perf.js
- *   k6 run --env BASE_URL=http://localhost:8001 --env PROFILE=supplier-dedup resolution.perf.js
+ *   k6 run --env BASE_URL=http://localhost:8001 --env PROFILE=b2b-supplier resolution.perf.js
  *   k6 run --env BASE_URL=http://myserver:8001 --env API_KEY=secret resolution.perf.js
  *
- * Output HTML report (requires k6-reporter):
+ * Output reports:
  *   k6 run --out json=results.json resolution.perf.js
+ *   k6 run --out influxdb=http://localhost:8086/k6 resolution.perf.js
  */
 
 import http    from 'k6/http';
 import { check, group, sleep } from 'k6';
 import { Trend, Rate, Counter } from 'k6/metrics';
+import { htmlReport } from 'https://raw.githubusercontent.com/benc-uk/k6-reporter/main/dist/bundle.js';
+import { textSummary } from 'https://jslib.k6.io/k6-summary/0.0.1/index.js';
 
 // ── Environment configuration ─────────────────────────────────────────────────
 const BASE_URL = __ENV.BASE_URL  || 'http://localhost:8001';
-const PROFILE  = __ENV.PROFILE   || 'supplier-dedup';
+const PROFILE  = __ENV.PROFILE   || 'b2b-supplier';
 const API_KEY  = __ENV.API_KEY   || '';
 
 const HEADERS = {
@@ -33,6 +41,14 @@ const HEADERS = {
   'Accept':       'application/json',
   ...(API_KEY ? { 'X-API-Key': API_KEY } : {}),
 };
+
+// ── Test Statistics ───────────────────────────────────────────────────────────
+//    Total entity variations: 100+ across all scenarios
+//    • EXACT:    30+ entities with different field combinations
+//    • FUZZY:    30+ entities with 1-3 character typos
+//    • SEMANTIC: 30+ descriptive free-text queries
+//    • NO_MATCH: 15+ completely novel entities
+//    • BATCH:    10+ multi-entity batch requests
 
 // ── Custom per-scenario latency metrics ───────────────────────────────────────
 //    These appear separately in the K6 summary, making it easy to compare
@@ -47,18 +63,18 @@ const cacheHitCount   = new Counter('cache_hit_responses');
 
 // ── Load profile ──────────────────────────────────────────────────────────────
 //
-//   Phase 1 ─ Warm-up     (30s →  2 VUs): seeds caches, warms JVM/NestJS event loop
-//   Phase 2 ─ Ramp-up     (60s →  5 VUs): gradual load increase
-//   Phase 3 ─ Ramp-up     (60s → 10 VUs): peak ramp
-//   Phase 4 ─ Steady-state(120s → 10 VUs): primary measurement window
+//   Phase 1 ─ Warm-up     (30s →  3 VUs): seeds caches, warms JVM/NestJS event loop
+//   Phase 2 ─ Ramp-up     (60s → 10 VUs): gradual load increase
+//   Phase 3 ─ Ramp-up     (60s → 20 VUs): peak ramp (tests 100+ entities)
+//   Phase 4 ─ Steady-state(180s → 20 VUs): primary measurement window
 //   Phase 5 ─ Ramp-down   (30s →  0 VUs): graceful teardown
 //
 export const options = {
   stages: [
-    { duration: '30s',  target: 2  },
-    { duration: '60s',  target: 5  },
+    { duration: '30s',  target: 3  },
     { duration: '60s',  target: 10 },
-    { duration: '120s', target: 10 },
+    { duration: '60s',  target: 20 },
+    { duration: '180s', target: 20 },
     { duration: '30s',  target: 0  },
   ],
 
@@ -113,73 +129,245 @@ export const options = {
   },
 };
 
-// ── Test data ─────────────────────────────────────────────────────────────────
+// ── Test data (100+ entity variations) ───────────────────────────────────────
 //
-// EXACT_PAYLOADS: known tax_id values expected to exist in the profile.
+// EXACT_PAYLOADS: known entities expected to exist in the profile.
 // The fast-path checker bypasses the full embedding pipeline for these.
+// 30+ variations with different field combinations.
 const EXACT_PAYLOADS = [
-  { fields: { name: 'Acme Supply Co',            tax_id: '36-1234567', city: 'Chicago'    }, threshold: 0.65 },
-  { fields: { name: 'Global Parts Mfg',           tax_id: '13-9876543', city: 'Detroit'    }, threshold: 0.65 },
-  { fields: { name: 'Precision Components Ltd',   tax_id: 'GB987654321', city: 'Manchester' }, threshold: 0.65 },
-  { fields: { name: 'Apex Industrial Group',      tax_id: '47-2345678', city: 'Houston'    }, threshold: 0.65 },
-  { fields: { name: 'Summit Manufacturing LLC',   tax_id: '82-3456789', city: 'Dallas'     }, threshold: 0.65 },
-  { fields: { name: 'Riverside Fabrication Co',   tax_id: '55-6789012', city: 'Phoenix'    }, threshold: 0.65 },
-  { fields: { name: 'Lakefront Steel Works',      tax_id: '33-4567890', city: 'Cleveland'  }, threshold: 0.65 },
+  // Standard supplier entities
+  { fields: { supplier_name: 'Acme Supply Co',            tax_id: '36-1234567', city: 'Chicago'    }, threshold: 0.70 },
+  { fields: { supplier_name: 'Global Parts Mfg',          tax_id: '13-9876543', city: 'Detroit'    }, threshold: 0.70 },
+  { fields: { supplier_name: 'Precision Components Ltd',  tax_id: 'GB987654321', city: 'Manchester' }, threshold: 0.70 },
+  { fields: { supplier_name: 'Apex Industrial Group',     tax_id: '47-2345678', city: 'Houston'    }, threshold: 0.70 },
+  { fields: { supplier_name: 'Summit Manufacturing LLC',  tax_id: '82-3456789', city: 'Dallas'     }, threshold: 0.70 },
+  { fields: { supplier_name: 'Riverside Fabrication Co',  tax_id: '55-6789012', city: 'Phoenix'    }, threshold: 0.70 },
+  { fields: { supplier_name: 'Lakefront Steel Works',     tax_id: '33-4567890', city: 'Cleveland'  }, threshold: 0.70 },
+  
+  // Asian suppliers
+  { fields: { supplier_name: 'Shanghai Electronics Supply Co', tax_id: 'CN-8765432', city: 'Shanghai' }, threshold: 0.70 },
+  { fields: { supplier_name: 'Tokyo Precision Parts Ltd',      tax_id: 'JP-1122334', city: 'Tokyo'    }, threshold: 0.70 },
+  { fields: { supplier_name: 'Seoul Manufacturing Group',      tax_id: 'KR-5566778', city: 'Seoul'    }, threshold: 0.70 },
+  { fields: { supplier_name: 'Beijing Industrial Corp',        tax_id: 'CN-2233445', city: 'Beijing'  }, threshold: 0.70 },
+  { fields: { supplier_name: 'Taipei Components Ltd',          tax_id: 'TW-6677889', city: 'Taipei'   }, threshold: 0.70 },
+  
+  // European suppliers
+  { fields: { supplier_name: 'Berlin Machinery GmbH',      tax_id: 'DE-3344556', city: 'Berlin'    }, threshold: 0.70 },
+  { fields: { supplier_name: 'Paris Industrial SA',        tax_id: 'FR-7788990', city: 'Paris'     }, threshold: 0.70 },
+  { fields: { supplier_name: 'Amsterdam Components BV',    tax_id: 'NL-4455667', city: 'Amsterdam' }, threshold: 0.70 },
+  { fields: { supplier_name: 'Milan Fabrication SpA',      tax_id: 'IT-8899001', city: 'Milan'     }, threshold: 0.70 },
+  { fields: { supplier_name: 'Barcelona Parts SL',         tax_id: 'ES-5566778', city: 'Barcelona' }, threshold: 0.70 },
+  
+  // Mixed field combinations
+  { fields: { supplier_name: 'Atlantic Metals Inc',        city: 'Boston',    country: 'USA' }, threshold: 0.65 },
+  { fields: { supplier_name: 'Pacific Components LLC',     city: 'Seattle',   country: 'USA' }, threshold: 0.65 },
+  { fields: { supplier_name: 'Midwest Manufacturing Co',   city: 'Milwaukee', country: 'USA' }, threshold: 0.65 },
+  { fields: { supplier_name: 'Southern Industrial Group',  city: 'Atlanta',   country: 'USA' }, threshold: 0.65 },
+  { fields: { supplier_name: 'Northern Supply Chain Ltd',  city: 'Toronto',   country: 'Canada' }, threshold: 0.65 },
+  
+  // Tax ID only (tests exact match without name)
+  { fields: { tax_id: '36-1234567' }, threshold: 0.80 },
+  { fields: { tax_id: 'GB987654321' }, threshold: 0.80 },
+  { fields: { tax_id: 'CN-8765432' }, threshold: 0.80 },
+  { fields: { tax_id: 'JP-1122334' }, threshold: 0.80 },
+  
+  // Name + City (no tax_id)
+  { fields: { supplier_name: 'Acme Supply Co', city: 'Chicago' }, threshold: 0.65 },
+  { fields: { supplier_name: 'Global Parts Mfg', city: 'Detroit' }, threshold: 0.65 },
+  { fields: { supplier_name: 'Shanghai Electronics Supply Co', city: 'Shanghai' }, threshold: 0.65 },
+  { fields: { supplier_name: 'Tokyo Precision Parts Ltd', city: 'Tokyo' }, threshold: 0.65 },
 ];
 
 // FUZZY_PAYLOADS: deliberate typos to exercise Levenshtein scoring.
-// Each input has 1–3 character edits that should still match above threshold.
+// 30+ variations with 1–3 character edits.
 const FUZZY_PAYLOADS = [
-  { fields: { name: 'Acme Suply Co',         city: 'Chicago'   }, threshold: 0.60 },  // "Suply" → 1 edit
-  { fields: { name: 'Globl Parts Mfg',        city: 'Detroit'   }, threshold: 0.60 },  // "Globl" → 1 edit
-  { fields: { name: 'Precison Componants',    city: 'Manchester'}, threshold: 0.55 },  // 2 typos
-  { fields: { name: 'Apex Industral Grp',     city: 'Houston'   }, threshold: 0.60 },  // "Industral" + abbrev
-  { fields: { name: 'Sumit Manufacturng',     city: 'Dallas'    }, threshold: 0.60 },  // 2 edits
-  { fields: { name: 'Riverside Fabricaton',   city: 'Phoenix'   }, threshold: 0.60 },  // "Fabricaton" → 1 edit
-  { fields: { name: 'Lakfront Steel Werks',   city: 'Cleveland' }, threshold: 0.55 },  // 2 edits
+  // Single character typos
+  { fields: { supplier_name: 'Acme Suply Co',         city: 'Chicago'   }, threshold: 0.60 },
+  { fields: { supplier_name: 'Globl Parts Mfg',       city: 'Detroit'   }, threshold: 0.60 },
+  { fields: { supplier_name: 'Precison Components',   city: 'Manchester'}, threshold: 0.60 },
+  { fields: { supplier_name: 'Apex Industral Group',  city: 'Houston'   }, threshold: 0.60 },
+  { fields: { supplier_name: 'Sumit Manufacturing',   city: 'Dallas'    }, threshold: 0.60 },
+  { fields: { supplier_name: 'Riverside Fabricaton',  city: 'Phoenix'   }, threshold: 0.60 },
+  { fields: { supplier_name: 'Lakfront Steel Works',  city: 'Cleveland' }, threshold: 0.60 },
+  
+  // Double character typos
+  { fields: { supplier_name: 'Shangha Electrnics Supply', city: 'Shanghai' }, threshold: 0.55 },
+  { fields: { supplier_name: 'Tokio Precison Parts',      city: 'Tokyo'    }, threshold: 0.55 },
+  { fields: { supplier_name: 'Seol Manufactring Group',   city: 'Seoul'    }, threshold: 0.55 },
+  { fields: { supplier_name: 'Bejing Industial Corp',     city: 'Beijing'  }, threshold: 0.55 },
+  { fields: { supplier_name: 'Taipe Components Ltd',      city: 'Taipei'   }, threshold: 0.55 },
+  
+  // European typos
+  { fields: { supplier_name: 'Berln Machinery GmbH',   city: 'Berlin'    }, threshold: 0.60 },
+  { fields: { supplier_name: 'Pars Industrial SA',     city: 'Paris'     }, threshold: 0.60 },
+  { fields: { supplier_name: 'Amstedam Components',    city: 'Amsterdam' }, threshold: 0.55 },
+  { fields: { supplier_name: 'Miln Fabrication SpA',   city: 'Milan'     }, threshold: 0.60 },
+  { fields: { supplier_name: 'Barcelna Parts SL',      city: 'Barcelona' }, threshold: 0.60 },
+  
+  // Abbreviation variations
+  { fields: { supplier_name: 'Acme Sup Co',            city: 'Chicago'    }, threshold: 0.55 },
+  { fields: { supplier_name: 'Global Pts Mfg',         city: 'Detroit'    }, threshold: 0.55 },
+  { fields: { supplier_name: 'Precision Comp Ltd',     city: 'Manchester' }, threshold: 0.55 },
+  { fields: { supplier_name: 'Apex Ind Grp',           city: 'Houston'    }, threshold: 0.55 },
+  { fields: { supplier_name: 'Summit Mfg LLC',         city: 'Dallas'     }, threshold: 0.55 },
+  
+  // Mixed typos and abbreviations
+  { fields: { supplier_name: 'Atlntic Metls Inc',      city: 'Boston'     }, threshold: 0.55 },
+  { fields: { supplier_name: 'Pacfic Componts LLC',    city: 'Seattle'    }, threshold: 0.55 },
+  { fields: { supplier_name: 'Midwst Mfg Co',          city: 'Milwaukee'  }, threshold: 0.55 },
+  { fields: { supplier_name: 'Southrn Ind Grp',        city: 'Atlanta'    }, threshold: 0.55 },
+  { fields: { supplier_name: 'Northrn Supply Chn',     city: 'Toronto'    }, threshold: 0.55 },
+  
+  // Case variations with typos
+  { fields: { supplier_name: 'ACME SUPLY CO',          city: 'Chicago'    }, threshold: 0.60 },
+  { fields: { supplier_name: 'global parts mfg',       city: 'Detroit'    }, threshold: 0.60 },
+  { fields: { supplier_name: 'SHANGHA ELECTRONICS',    city: 'Shanghai'   }, threshold: 0.55 },
+  { fields: { supplier_name: 'tokyo precison parts',   city: 'Tokyo'      }, threshold: 0.55 },
 ];
 
 // SEMANTIC_PAYLOADS: descriptive free-text queries that exercise embedding + ANN.
-// These simulate users describing a company without knowing its exact name.
+// 30+ variations simulating users describing a company without knowing exact name.
 const SEMANTIC_PAYLOADS = [
-  { fields: { name: 'industrial supply company based in Chicago Illinois'   }, threshold: 0.55 },
-  { fields: { name: 'automotive parts manufacturer in Detroit Michigan'       }, threshold: 0.55 },
-  { fields: { name: 'precision engineering and components supplier in UK'     }, threshold: 0.55 },
-  { fields: { name: 'heavy industry manufacturing group Texas'                }, threshold: 0.55 },
-  { fields: { name: 'metal fabrication and manufacturing company Dallas'      }, threshold: 0.55 },
-  { fields: { name: 'steel fabrication works based in Ohio'                   }, threshold: 0.55 },
+  // Industry-based queries
+  { fields: { supplier_name: 'industrial supply company based in Chicago Illinois'   }, threshold: 0.50 },
+  { fields: { supplier_name: 'automotive parts manufacturer in Detroit Michigan'      }, threshold: 0.50 },
+  { fields: { supplier_name: 'precision engineering and components supplier in UK'    }, threshold: 0.50 },
+  { fields: { supplier_name: 'heavy industry manufacturing group Texas'               }, threshold: 0.50 },
+  { fields: { supplier_name: 'metal fabrication and manufacturing company Dallas'     }, threshold: 0.50 },
+  { fields: { supplier_name: 'steel fabrication works based in Ohio'                  }, threshold: 0.50 },
+  
+  // Asian market queries
+  { fields: { supplier_name: 'electronics supplier in Shanghai China'                 }, threshold: 0.50 },
+  { fields: { supplier_name: 'precision manufacturing company Tokyo Japan'            }, threshold: 0.50 },
+  { fields: { supplier_name: 'industrial manufacturer in Seoul South Korea'           }, threshold: 0.50 },
+  { fields: { supplier_name: 'technology components supplier Beijing'                 }, threshold: 0.50 },
+  { fields: { supplier_name: 'electronics parts manufacturer Taiwan'                  }, threshold: 0.50 },
+  
+  // European market queries
+  { fields: { supplier_name: 'machinery manufacturer in Berlin Germany'               }, threshold: 0.50 },
+  { fields: { supplier_name: 'industrial equipment supplier Paris France'             }, threshold: 0.50 },
+  { fields: { supplier_name: 'components manufacturer Amsterdam Netherlands'          }, threshold: 0.50 },
+  { fields: { supplier_name: 'fabrication company in Milan Italy'                     }, threshold: 0.50 },
+  { fields: { supplier_name: 'industrial parts supplier Barcelona Spain'              }, threshold: 0.50 },
+  
+  // Material-based queries
+  { fields: { supplier_name: 'steel and metal supplier in Chicago'                    }, threshold: 0.50 },
+  { fields: { supplier_name: 'aluminum fabrication company in Detroit'                }, threshold: 0.50 },
+  { fields: { supplier_name: 'electronic components and parts supplier'               }, threshold: 0.45 },
+  { fields: { supplier_name: 'industrial machinery and equipment manufacturer'        }, threshold: 0.45 },
+  { fields: { supplier_name: 'precision mechanical components supplier'               }, threshold: 0.45 },
+  
+  // Regional queries
+  { fields: { supplier_name: 'East Coast manufacturing company'                       }, threshold: 0.45 },
+  { fields: { supplier_name: 'West Coast industrial supplier'                         }, threshold: 0.45 },
+  { fields: { supplier_name: 'Midwest manufacturing and fabrication'                  }, threshold: 0.45 },
+  { fields: { supplier_name: 'Southern industrial equipment company'                  }, threshold: 0.45 },
+  { fields: { supplier_name: 'Pacific Northwest supply chain provider'                }, threshold: 0.45 },
+  
+  // Service-based queries
+  { fields: { supplier_name: 'high volume production manufacturing'                   }, threshold: 0.45 },
+  { fields: { supplier_name: 'custom fabrication and machining services'              }, threshold: 0.45 },
+  { fields: { supplier_name: 'industrial engineering and design company'              }, threshold: 0.45 },
+  { fields: { supplier_name: 'supply chain and logistics provider'                    }, threshold: 0.45 },
+  { fields: { supplier_name: 'OEM parts manufacturer and distributor'                 }, threshold: 0.45 },
 ];
 
 // NO_MATCH_PAYLOADS: completely novel entities — exercises full pipeline with no match.
 // create_if_missing: false so no DB write happens during the perf test.
+// 15 variations to ensure comprehensive no-match testing.
 const NO_MATCH_PAYLOADS = [
-  { fields: { name: 'Quantum Dynamics Corp Alpha',  tax_id: '00-0000001', city: 'Nowhere' }, threshold: 0.65, create_if_missing: false },
-  { fields: { name: 'Temporal Solutions Beta LLC',  tax_id: '00-0000002', city: 'Nowhere' }, threshold: 0.65, create_if_missing: false },
-  { fields: { name: 'Future Technologies Gamma Inc',tax_id: '00-0000003', city: 'Nowhere' }, threshold: 0.65, create_if_missing: false },
+  { fields: { supplier_name: 'Quantum Dynamics Corp Alpha',    tax_id: '00-0000001', city: 'Nowhere' }, threshold: 0.70, create_if_missing: false },
+  { fields: { supplier_name: 'Temporal Solutions Beta LLC',    tax_id: '00-0000002', city: 'Nowhere' }, threshold: 0.70, create_if_missing: false },
+  { fields: { supplier_name: 'Future Technologies Gamma Inc',  tax_id: '00-0000003', city: 'Nowhere' }, threshold: 0.70, create_if_missing: false },
+  { fields: { supplier_name: 'Nexus Innovations Delta Corp',   tax_id: '00-0000004', city: 'Nowhere' }, threshold: 0.70, create_if_missing: false },
+  { fields: { supplier_name: 'Zenith Manufacturing Epsilon',   tax_id: '00-0000005', city: 'Nowhere' }, threshold: 0.70, create_if_missing: false },
+  { fields: { supplier_name: 'Odyssey Components Zeta Ltd',    tax_id: '00-0000006', city: 'Nowhere' }, threshold: 0.70, create_if_missing: false },
+  { fields: { supplier_name: 'Phoenix Industrial Eta Group',   tax_id: '00-0000007', city: 'Nowhere' }, threshold: 0.70, create_if_missing: false },
+  { fields: { supplier_name: 'Aurora Technologies Theta Inc',  tax_id: '00-0000008', city: 'Nowhere' }, threshold: 0.70, create_if_missing: false },
+  { fields: { supplier_name: 'Nova Manufacturing Iota LLC',    tax_id: '00-0000009', city: 'Nowhere' }, threshold: 0.70, create_if_missing: false },
+  { fields: { supplier_name: 'Stellar Components Kappa Co',    tax_id: '00-0000010', city: 'Nowhere' }, threshold: 0.70, create_if_missing: false },
+  { fields: { supplier_name: 'Vortex Industrial Lambda Group', tax_id: '00-0000011', city: 'Nowhere' }, threshold: 0.70, create_if_missing: false },
+  { fields: { supplier_name: 'Apex Future Mu Corporation',     tax_id: '00-0000012', city: 'Nowhere' }, threshold: 0.70, create_if_missing: false },
+  { fields: { supplier_name: 'Infinity Parts Nu Enterprises',  tax_id: '00-0000013', city: 'Nowhere' }, threshold: 0.70, create_if_missing: false },
+  { fields: { supplier_name: 'Horizon Manufacturing Xi LLC',   tax_id: '00-0000014', city: 'Nowhere' }, threshold: 0.70, create_if_missing: false },
+  { fields: { supplier_name: 'Titan Industries Omicron Inc',   tax_id: '00-0000015', city: 'Nowhere' }, threshold: 0.70, create_if_missing: false },
 ];
 
 // BATCH_PAYLOADS: mixed batches to test concurrent Promise.allSettled throughput.
+// 10+ batch variations with different entity combinations.
 const BATCH_PAYLOADS = [
   {
     entities: [
-      { fields: { name: 'Acme Suply Co',        city: 'Chicago'   }, threshold: 0.60 },
-      { fields: { name: 'Globl Parts Mfg',       city: 'Detroit'   }, threshold: 0.60 },
-      { fields: { name: 'New Vendor Alpha Corp',  city: 'Austin'    }, threshold: 0.65, create_if_missing: false },
+      { fields: { supplier_name: 'Acme Suply Co',        city: 'Chicago'   }, threshold: 0.60 },
+      { fields: { supplier_name: 'Globl Parts Mfg',      city: 'Detroit'   }, threshold: 0.60 },
+      { fields: { supplier_name: 'New Vendor Alpha Corp', city: 'Austin'    }, threshold: 0.70, create_if_missing: false },
     ],
   },
   {
     entities: [
-      { fields: { name: 'Acme Supply Co',        tax_id: '36-1234567' }, threshold: 0.65 },
-      { fields: { name: 'Precison Componants',   city: 'Manchester'   }, threshold: 0.55 },
-      { fields: { name: 'Beta Innovations Ltd',  city: 'Seattle'      }, threshold: 0.65, create_if_missing: false },
-      { fields: { name: 'Gamma Tech Solutions',  city: 'Boston'       }, threshold: 0.65, create_if_missing: false },
+      { fields: { supplier_name: 'Acme Supply Co',       tax_id: '36-1234567' }, threshold: 0.70 },
+      { fields: { supplier_name: 'Precison Components',  city: 'Manchester'   }, threshold: 0.55 },
+      { fields: { supplier_name: 'Beta Innovations Ltd', city: 'Seattle'      }, threshold: 0.70, create_if_missing: false },
+      { fields: { supplier_name: 'Gamma Tech Solutions', city: 'Boston'       }, threshold: 0.70, create_if_missing: false },
     ],
   },
   {
     entities: [
-      { fields: { name: 'Summit Manufacturng',   city: 'Dallas'    }, threshold: 0.60 },
-      { fields: { name: 'Apex Industrial Group', tax_id: '47-2345678' }, threshold: 0.65 },
-      { fields: { name: 'Riverside Fabricaton',  city: 'Phoenix'   }, threshold: 0.60 },
+      { fields: { supplier_name: 'Sumit Manufacturing',   city: 'Dallas'    }, threshold: 0.60 },
+      { fields: { supplier_name: 'Apex Industrial Group', tax_id: '47-2345678' }, threshold: 0.70 },
+      { fields: { supplier_name: 'Riverside Fabricaton',  city: 'Phoenix'   }, threshold: 0.60 },
+    ],
+  },
+  {
+    entities: [
+      { fields: { supplier_name: 'Shanghai Electronics Supply Co', tax_id: 'CN-8765432' }, threshold: 0.70 },
+      { fields: { supplier_name: 'Tokyo Precison Parts',           city: 'Tokyo'        }, threshold: 0.55 },
+      { fields: { supplier_name: 'Seoul Manufacturing Group',      city: 'Seoul'        }, threshold: 0.65 },
+      { fields: { supplier_name: 'Beijing Industrial Corp',        tax_id: 'CN-2233445' }, threshold: 0.70 },
+    ],
+  },
+  {
+    entities: [
+      { fields: { supplier_name: 'Berlin Machinery GmbH',  city: 'Berlin'    }, threshold: 0.65 },
+      { fields: { supplier_name: 'Paris Industrial SA',    city: 'Paris'     }, threshold: 0.65 },
+      { fields: { supplier_name: 'Amsterdam Components',   city: 'Amsterdam' }, threshold: 0.55 },
+    ],
+  },
+  {
+    entities: [
+      { fields: { supplier_name: 'electronics supplier in Shanghai China'   }, threshold: 0.50 },
+      { fields: { supplier_name: 'precision manufacturing company Tokyo'    }, threshold: 0.50 },
+      { fields: { supplier_name: 'industrial manufacturer in Seoul'         }, threshold: 0.50 },
+    ],
+  },
+  {
+    entities: [
+      { fields: { supplier_name: 'Atlntic Metls Inc',   city: 'Boston'     }, threshold: 0.55 },
+      { fields: { supplier_name: 'Pacfic Componts LLC', city: 'Seattle'    }, threshold: 0.55 },
+      { fields: { supplier_name: 'Midwst Mfg Co',       city: 'Milwaukee'  }, threshold: 0.55 },
+      { fields: { supplier_name: 'Southrn Ind Grp',     city: 'Atlanta'    }, threshold: 0.55 },
+    ],
+  },
+  {
+    entities: [
+      { fields: { tax_id: '36-1234567' }, threshold: 0.80 },
+      { fields: { tax_id: 'GB987654321' }, threshold: 0.80 },
+      { fields: { tax_id: 'CN-8765432' }, threshold: 0.80 },
+    ],
+  },
+  {
+    entities: [
+      { fields: { supplier_name: 'machinery manufacturer in Berlin Germany'  }, threshold: 0.50 },
+      { fields: { supplier_name: 'industrial equipment supplier Paris France'}, threshold: 0.50 },
+      { fields: { supplier_name: 'components manufacturer Amsterdam'         }, threshold: 0.50 },
+      { fields: { supplier_name: 'fabrication company in Milan Italy'        }, threshold: 0.50 },
+    ],
+  },
+  {
+    entities: [
+      { fields: { supplier_name: 'Quantum Dynamics Corp',  tax_id: '00-0000020', city: 'Nowhere' }, threshold: 0.70, create_if_missing: false },
+      { fields: { supplier_name: 'Nexus Innovations Ltd',  tax_id: '00-0000021', city: 'Nowhere' }, threshold: 0.70, create_if_missing: false },
+      { fields: { supplier_name: 'Zenith Technologies Inc',tax_id: '00-0000022', city: 'Nowhere' }, threshold: 0.70, create_if_missing: false },
     ],
   },
 ];
@@ -434,7 +622,96 @@ export function setup() {
 
 // ── Teardown: print a results summary ────────────────────────────────────────
 export function teardown(data) {
-  console.log('\n=== Test Complete ===');
-  console.log('Check the thresholds above for p50/p90/p95/p99 per scenario.');
-  console.log('Run with --out json=results.json to export raw metrics.');
+  console.log('\n╔════════════════════════════════════════════════════════════════════╗');
+  console.log('║           ResolveIQ v2 Performance Test Complete                  ║');
+  console.log('╚════════════════════════════════════════════════════════════════════╝');
+  console.log('\n📊 Detailed percentile metrics (p50/p90/p95/p99) shown in summary above.');
+  console.log('📈 Check thresholds for pass/fail status per scenario.');
+  console.log('💾 Run with --out json=results.json to export raw metrics.');
+  console.log('📄 Run with --out html=report.html for HTML report (if k6-reporter installed).');
+  console.log('\n✅ Test Coverage:');
+  console.log(`   • ${EXACT_PAYLOADS.length} EXACT fast-path scenarios`);
+  console.log(`   • ${FUZZY_PAYLOADS.length} FUZZY resolution scenarios`);
+  console.log(`   • ${SEMANTIC_PAYLOADS.length} SEMANTIC embedding scenarios`);
+  console.log(`   • ${NO_MATCH_PAYLOADS.length} NO_MATCH scenarios`);
+  console.log(`   • ${BATCH_PAYLOADS.length} BATCH resolve scenarios`);
+  console.log(`   • Total: ${EXACT_PAYLOADS.length + FUZZY_PAYLOADS.length + SEMANTIC_PAYLOADS.length + NO_MATCH_PAYLOADS.length + BATCH_PAYLOADS.length}+ unique entity variations\n`);
+}
+
+// ── Custom Summary Handler ───────────────────────────────────────────────────
+//    Generates detailed HTML report and text summary with all percentiles
+export function handleSummary(data) {
+  const summary = {
+    'stdout': textSummary(data, { indent: ' ', enableColors: true }),
+  };
+
+  // Add HTML report if k6-reporter is available
+  try {
+    summary['summary.html'] = htmlReport(data);
+    console.log('\n📄 HTML report generated: summary.html');
+  } catch (e) {
+    // k6-reporter not installed, skip HTML
+  }
+
+  // Custom percentile summary
+  console.log('\n╔════════════════════════════════════════════════════════════════════╗');
+  console.log('║                   DETAILED PERCENTILE BREAKDOWN                    ║');
+  console.log('╚════════════════════════════════════════════════════════════════════╝\n');
+
+  const metrics = [
+    { name: 'EXACT Fast-Path',      key: 'p_exact_resolve_ms',    target: 'p99<600ms'  },
+    { name: 'FUZZY Resolution',     key: 'p_fuzzy_resolve_ms',    target: 'p99<1800ms' },
+    { name: 'SEMANTIC Resolution',  key: 'p_semantic_resolve_ms', target: 'p99<3000ms' },
+    { name: 'BATCH Resolution',     key: 'p_batch_resolve_ms',    target: 'p99<4000ms' },
+    { name: 'HTTP Request Duration',key: 'http_req_duration',     target: 'p99<2500ms' },
+  ];
+
+  metrics.forEach(metric => {
+    const m = data.metrics[metric.key];
+    if (m && m.values) {
+      const p50 = m.values['p(50)'] || 0;
+      const p90 = m.values['p(90)'] || 0;
+      const p95 = m.values['p(95)'] || 0;
+      const p99 = m.values['p(99)'] || 0;
+      const avg = m.values.avg || 0;
+      const max = m.values.max || 0;
+
+      console.log(`📊 ${metric.name} (target: ${metric.target})`);
+      console.log(`   ├─ p50:  ${p50.toFixed(2)}ms`);
+      console.log(`   ├─ p90:  ${p90.toFixed(2)}ms`);
+      console.log(`   ├─ p95:  ${p95.toFixed(2)}ms`);
+      console.log(`   ├─ p99:  ${p99.toFixed(2)}ms`);
+      console.log(`   ├─ avg:  ${avg.toFixed(2)}ms`);
+      console.log(`   └─ max:  ${max.toFixed(2)}ms\n`);
+    }
+  });
+
+  // Error rate summary
+  const errorRate = data.metrics['resolution_errors'];
+  const httpFailRate = data.metrics['http_req_failed'];
+  
+  console.log('╔════════════════════════════════════════════════════════════════════╗');
+  console.log('║                         ERROR SUMMARY                              ║');
+  console.log('╚════════════════════════════════════════════════════════════════════╝\n');
+  
+  if (errorRate && errorRate.values) {
+    console.log(`❌ Resolution Errors: ${(errorRate.values.rate * 100).toFixed(2)}% (target: <1%)`);
+  }
+  if (httpFailRate && httpFailRate.values) {
+    console.log(`🔴 HTTP Failures:     ${(httpFailRate.values.rate * 100).toFixed(2)}% (target: <1%)\n`);
+  }
+
+  // Cache hit rate summary
+  const cacheHits = data.metrics['cache_hit_responses'];
+  const iterations = data.metrics['iterations'];
+  
+  if (cacheHits && iterations && iterations.values) {
+    console.log('╔════════════════════════════════════════════════════════════════════╗');
+    console.log('║                         CACHE PERFORMANCE                          ║');
+    console.log('╚════════════════════════════════════════════════════════════════════╝\n');
+    const hitRate = (cacheHits.values.count / iterations.values.count * 100);
+    console.log(`💾 Cache Hit Rate: ${hitRate.toFixed(2)}% (${cacheHits.values.count} hits / ${iterations.values.count} requests)\n`);
+  }
+
+  return summary;
 }
